@@ -14,14 +14,16 @@ var colors = {
 	"text_muted": Color("#8395a7")
 }
 
-# Path halaman menu. "mulai bermain" memakai level pertama dari GameConfig.
+# Path halaman menu. "Mulai Bermain" memakai level berikutnya dari progres GameConfig.
 var target_scenes := {
 	"level_select": "res://main_menu/level_select.tscn",
 	"how_to_play": "res://tutor_bermain/cara_bermain.tscn",
 	"settings": "res://main_menu/settings.tscn"
 }
 
-var last_level_label: String = "Mulai dari Level 1"
+var next_level: Dictionary = {}
+var start_button_title: String = "▶  MULAI BERMAIN"
+var start_button_sub: String = "Mulai dari Level 1"
 
 # Variabel Animasi Latar Rekursi
 var zoom_progress: float = 0.0
@@ -43,7 +45,13 @@ var toast_panel: PanelContainer
 func _ready() -> void:
 	is_muted = GameConfig.muted
 	sfx_volume = GameConfig.sfx_volume
-	last_level_label = "Mulai dari " + str(GameConfig.first_playable_level()["title"])
+	next_level = GameConfig.next_playable_level()
+	if next_level.is_empty():
+		start_button_title = "GAMENYA TAMAT"
+		start_button_sub = "Level berikutnya belum dibuat (placeholder)"
+	else:
+		var awalan: String = "Lanjut ke " if GameConfig.last_completed_id != "" else "Mulai dari "
+		start_button_sub = awalan + str(next_level["title"])
 	_setup_audio()
 	_build_main_menu()
 
@@ -201,8 +209,11 @@ func _build_main_menu() -> void:
 	nav_vbox.add_theme_constant_override("separation", 12)
 	content_vbox.add_child(nav_vbox)
 	
-	_add_menu_button(nav_vbox, "▶  MULAI BERMAIN", last_level_label, colors["coral"], 440.0, func():
-		_go_to_scene(str(GameConfig.first_playable_level()["path"]), "Memuat Level...")
+	_add_menu_button(nav_vbox, start_button_title, start_button_sub, colors["coral"], 440.0, func():
+		if next_level.is_empty():
+			_show_toast("Gamenya tamat — level berikutnya belum dibuat.")
+			return
+		_go_to_scene(str(next_level["path"]), "Memuat Level...")
 	)
 	
 	_add_menu_button(nav_vbox, "⊞  PILIH LEVEL", "", colors["teal"], 523.25, func():

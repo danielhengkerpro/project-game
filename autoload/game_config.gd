@@ -6,12 +6,17 @@ extends Node
 # ==============================================================================
 
 const SETTINGS_PATH: String = "user://settings.cfg"
+const PROGRESS_PATH: String = "user://progress.json"
+const PROGRESS_VERSION: int = 1
 
 signal fullscreen_changed(value: bool)
 
 var muted: bool = false
 var sfx_volume: float = 0.85
 var fullscreen: bool = false
+
+# Id level terakhir yang diselesaikan. "" berarti belum ada progres.
+var last_completed_id: String = ""
 
 # Urutan di sini = urutan tampil di halaman "Pilih Level".
 var levels: Array = [
@@ -40,13 +45,76 @@ var levels: Array = [
 
 func _ready() -> void:
 	load_settings()
+	load_progress()
 
-# Level pertama yang bukan tutorial (dipakai tombol "Mulai Bermain").
+# Level pertama yang bukan tutorial.
 func first_playable_level() -> Dictionary:
 	for lv in levels:
 		if lv["id"] != "tutorial":
 			return lv
 	return levels[0]
+
+# ------------------------------------------------------------------ progres
+func _level_index(id: String) -> int:
+	for i in range(levels.size()):
+		if levels[i]["id"] == id:
+			return i
+	return -1
+
+# Level yang harus dibuka tombol "Mulai Bermain".
+# Kosong berarti semua level yang terdaftar sudah selesai (placeholder "tamat").
+func next_playable_level() -> Dictionary:
+	var idx: int = _level_index(last_completed_id)
+	if idx < 0:
+		return first_playable_level()
+	var next_idx: int = idx + 1
+	while next_idx < levels.size():
+		if levels[next_idx]["id"] != "tutorial":
+			return levels[next_idx]
+		next_idx += 1
+	return {}
+
+# Dipanggil tiap kali pemain menyelesaikan level. Hanya boleh maju, supaya
+# mengulang tutorial tidak menimpa progres yang sudah lebih jauh.
+func complete_level(id: String) -> void:
+	var idx: int = _level_index(id)
+	if idx < 0 or idx <= _level_index(last_completed_id):
+		return
+	last_completed_id = id
+	_save_progress()
+
+# Tulis file sementara dulu, simpan salinan lama sebagai .bak, lalu rename.
+# Kalau crash di tengah tulis, loader masih punya file yang utuh.
+func _save_progress() -> void:
+	var tmp: String = PROGRESS_PATH + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		push_warning("Gagal membuka file progres: %s" % error_string(FileAccess.get_open_error()))
+		return
+	var data := {"version": PROGRESS_VERSION, "last_completed": last_completed_id}
+	f.store_string(JSON.stringify(data))
+	f.close()
+	if FileAccess.file_exists(PROGRESS_PATH):
+		DirAccess.rename_absolute(PROGRESS_PATH, PROGRESS_PATH + ".bak")
+	var err: Error = DirAccess.rename_absolute(tmp, PROGRESS_PATH)
+	if err != OK:
+		push_warning("Gagal menyimpan progres: %s" % error_string(err))
+
+func load_progress() -> void:
+	last_completed_id = ""
+	for path in [PROGRESS_PATH, PROGRESS_PATH + ".bak"]:
+		if not FileAccess.file_exists(path):
+			continue
+		var parsed = JSON.parse_string(FileAccess.get_file_as_string(path))
+		if not parsed is Dictionary:
+			continue
+		var version: int = int(parsed.get("version", 0))
+		if version > PROGRESS_VERSION:
+			continue
+		var id: String = str(parsed.get("last_completed", ""))
+		if _level_index(id) >= 0:
+			last_completed_id = id
+			return
 
 # ------------------------------------------------------------------ settings
 func load_settings() -> void:

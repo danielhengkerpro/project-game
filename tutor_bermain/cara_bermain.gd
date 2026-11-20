@@ -270,6 +270,7 @@ func get_entity_at(r: Room, pos: Vector2i) -> Entity:
 func check_win_condition():
 	if target_crate.room == rooms["Outer"] and rooms["Outer"].grid[target_crate.pos.y][target_crate.pos.x] == TileType.GOAL:
 		is_won = true
+		GameConfig.complete_level("tutorial")
 		Sfx.play("win")
 		queue_redraw()
 

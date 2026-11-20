@@ -476,6 +476,7 @@ func _check_win_condition() -> void:
 
 	is_completed = true
 	win_overlay.visible = true
+	GameConfig.complete_level("level1")
 	Sfx.play("win")
 
 func _setup_win_overlay() -> void:

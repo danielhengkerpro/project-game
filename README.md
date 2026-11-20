@@ -48,6 +48,12 @@ Proyek langsung bisa dijalankan tanpa setup tambahan. Folder `.godot/` (cache im
 
 `export_presets.cfg` sudah berisi preset **Windows Desktop**. Butuh export template Godot 4.7 yang sesuai.
 
+## Lanjut bermain & menambah level
+
+Progres level tersimpan otomatis di `user://progress.json` saat pemain menyelesaikan level. Tombol **Mulai Bermain** akan membuka level berikutnya; kalau semua level yang terdaftar sudah selesai, tombol berubah jadi **GAMENYA TAMAT** (placeholder sampai ada ending).
+
+Sebelum menambah level baru atau mengubah kode, baca **`AGENTS.md`**. Di sana ada aturan proyek dan checklist yang harus diikuti supaya autosave dan tombol lanjut bermain tetap bekerja.
+
 ## Lisensi
 
 Kode game di repo ini bebas dipakai untuk belajar. Plugin `addons/godot_ai/` adalah proyek pihak ketiga dengan lisensi MIT — lihat `addons/godot_ai/LICENSE`.
