@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://c0hr0arrc1p8h"]
+
+[ext_resource type="Script" uid="uid://ckk16nfdr1ric" path="res://tutor_bermain/cara_bermain.gd" id="1_j4j1w"]
+
+[node name="Node2D" type="Node2D" unique_id=1684447511]
+script = ExtResource("1_j4j1w")
