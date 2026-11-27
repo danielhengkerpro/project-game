@@ -163,6 +163,56 @@ func _build() -> void:
 	vol_row.add_child(vol_slider)
 	vol_row.add_child(vol_value)
 
+	# --- Musik latar on/off ---
+	var music_row := HBoxContainer.new()
+	rows.add_child(music_row)
+
+	var music_lbl := MenuUI.make_label("Musik Latar", 16, MenuUI.PALETTE["text_main"])
+	music_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	music_row.add_child(music_lbl)
+
+	var music_chk := CheckButton.new()
+	music_chk.button_pressed = not GameConfig.music_muted
+	music_chk.toggled.connect(func(on: bool):
+		GameConfig.music_muted = not on
+		GameConfig.save_settings()
+	)
+	music_row.add_child(music_chk)
+	_siapkan_baris(music_lbl, music_chk)
+
+	# --- Volume musik latar ---
+	var music_vol_row := HBoxContainer.new()
+	music_vol_row.add_theme_constant_override("separation", 14)
+	rows.add_child(music_vol_row)
+
+	var music_vol_lbl := MenuUI.make_label("Volume Musik", 16, MenuUI.PALETTE["text_main"])
+	music_vol_lbl.custom_minimum_size = Vector2(140, 0)
+	music_vol_row.add_child(music_vol_lbl)
+
+	var music_vol_value := MenuUI.make_label(
+		"%d%%" % int(round(GameConfig.music_volume * 100.0)),
+		15,
+		MenuUI.PALETTE["teal"]
+	)
+	music_vol_value.custom_minimum_size = Vector2(56, 0)
+	music_vol_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+
+	var music_vol_slider := HSlider.new()
+	music_vol_slider.min_value = 0.0
+	music_vol_slider.max_value = 100.0
+	music_vol_slider.step = 1.0
+	music_vol_slider.value = GameConfig.music_volume * 100.0
+	music_vol_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	music_vol_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	music_vol_slider.custom_minimum_size = Vector2(0, 24)
+	music_vol_slider.value_changed.connect(func(v: float):
+		GameConfig.music_volume = v / 100.0
+		music_vol_value.text = "%d%%" % int(round(v))
+		GameConfig.save_settings()
+	)
+	music_vol_row.add_child(music_vol_slider)
+	music_vol_row.add_child(music_vol_value)
+
 	# --- Layar penuh ---
 	var fs_row := HBoxContainer.new()
 	rows.add_child(fs_row)
@@ -180,7 +230,8 @@ func _build() -> void:
 	fs_row.add_child(fs_chk)
 	_siapkan_baris(fs_lbl, fs_chk)
 	GameConfig.fullscreen_changed.connect(func(on: bool):
-		fs_chk.set_pressed_no_signal(on)
+		if is_instance_valid(fs_chk):
+			fs_chk.set_pressed_no_signal(on)
 	)
 
 	# --- Footer ---

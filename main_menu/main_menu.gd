@@ -47,8 +47,8 @@ func _ready() -> void:
 	sfx_volume = GameConfig.sfx_volume
 	next_level = GameConfig.next_playable_level()
 	if next_level.is_empty():
-		start_button_title = "GAMENYA TAMAT"
-		start_button_sub = "Level berikutnya belum dibuat (placeholder)"
+		start_button_title = "★  GAMENYA TAMAT"
+		start_button_sub = "Semua 10 level telah diselesaikan!"
 	else:
 		var awalan: String = "Lanjut ke " if GameConfig.last_completed_id != "" else "Mulai dari "
 		start_button_sub = awalan + str(next_level["title"])
@@ -211,7 +211,7 @@ func _build_main_menu() -> void:
 	
 	_add_menu_button(nav_vbox, start_button_title, start_button_sub, colors["coral"], 440.0, func():
 		if next_level.is_empty():
-			_show_toast("Gamenya tamat — level berikutnya belum dibuat.")
+			_show_toast("Selamat! Kamu telah menamatkan seluruh 10 level PARABOX: REKURSI!")
 			return
 		_go_to_scene(str(next_level["path"]), "Memuat Level...")
 	)

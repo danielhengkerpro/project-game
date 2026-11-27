@@ -1,491 +1,694 @@
 extends Node2D
 
-# ==========================================
-# KONFIGURASI GAME & PALET ASET PARABOX
-# ==========================================
-const TILE_SIZE = 72
-const GRID_W = 12
-const GRID_H = 9
+# ==============================================================================
+# TUTORIAL - "CARA BERMAIN"
+#
+# Mengajarkan dasar Parabox dengan UI dan gaya visual yang sama seperti Level 1-7:
+#   1. Dorong kotak biru ke dinding kanan agar tidak bergeser lagi.
+#   2. Masuk ke dalam kotak biru dari sisi kiri.
+#   3. Dorong peti kuning keluar lewat pintu kiri ke ruang luar, lalu ke target 'G'.
+# ==============================================================================
 
-const COL_BG = Color("#181a24")
-const COL_FLOOR = Color("#232736")
-const COL_FLOOR_GRID = Color("#2c3144")
-const COL_OUTLINE = Color("#0d0f14")
+# ==============================================================================
+# 1. KONFIGURASI UKURAN GRID & WARNA
+# ==============================================================================
+const TILE_SIZE: int = 76
+const MOVE_DURATION: float = 0.13
+const ZOOM_DURATION: float = 0.30
+const DASH_TRAIL_COUNT: int = 3
+const DASH_TRAIL_DURATION: float = 0.22
+const MAX_DEPTH: int = 40
+const INVALID_POS := Vector2i(-1, -1)
+const MAIN_MENU_PATH: String = "res://main_menu/main_menu.tscn"
+const LEVEL1_PATH: String = "res://level1/level1.tscn"
 
-const PALETTE = {
-	"wall_outer": Color("#464d63"),
-	"wall_inner": Color("#34394a"),
-	"blue_outer": Color("#2d9cdb"),
-	"blue_inner": Color("#1b5e8a"),
-	"yellow_outer": Color("#f2b824"),
-	"yellow_inner": Color("#9c7211"),
-	"green_outer": Color("#4cd180"),
-	"green_inner": Color("#2b854e"),
-	"red_outer": Color("#eb4d63"),
-	"red_inner": Color("#992938"),
-	"purple_outer": Color("#9b6ef3"),
-	"purple_inner": Color("#5d3c9e"),
-	"wood_outer": Color("#c87d44"),
-	"wood_inner": Color("#96582a")
+var palette := {
+	"bg": Color("#000000"),
+	"bg_blue": Color("#2f5572"),
+	"floor": Color("#77432b"),
+	"wall": Color("#ffaa77"),
+	"wall_highlight": Color("#fbe49a"),
+	"outline": Color("#323c79"),
+	"blue": Color("#78a0ff"),
+	"blue_floor": Color("#2358ea"),
+	"blue_wall": Color("#b6dcee"),
+	"blue_light": Color("#e8f7ff"),
+	"yellow": Color("#fde069"),
+	"yellow_inner": Color("#ca8a04"),
+	"pink": Color("#de6edc"),
+	"pink_inner": Color("#a21caf"),
+	"teal": Color("#4ecdc4"),
+	"text": Color("#f1f2f6")
 }
 
-enum TileType {
-	EMPTY,
-	WALL,
-	GOAL,
-	PORTAL_OUT
+var themes := {
+	"orange": {
+		"wall": Color("#ffaa77"),
+		"floor": Color("#77432b"),
+		"light": Color("#fbe49a"),
+		"bg": Color("#000000")
+	},
+	"blue": {
+		"wall": Color("#b6dcee"),
+		"floor": Color("#2358ea"),
+		"light": Color("#e8f7ff"),
+		"bg": Color("#2f5572")
+	}
 }
 
-class Room:
-	var id: String
-	var theme: String
-	var grid: Array = []
-	var entities: Array = []
-	var parent_box: Entity = null
-	var entry_spawn: Vector2i = Vector2i(1, 4)
-	
-	func _init(_id: String, _theme: String = "slate"):
-		id = _id
-		theme = _theme
-		for y in range(GRID_H):
-			var row = []
-			for x in range(GRID_W):
-				row.append(TileType.EMPTY)
-			grid.append(row)
+# ==============================================================================
+# 2. DEFINISI PETA RUANGAN
+# ==============================================================================
+# '#' dinding, '.' lantai, 'G' target kotak, 'E' pintu keluar/masuk.
+var rooms := {
+	"outer": {
+		"name": "Tutorial - Ruang Luar",
+		"theme": "orange",
+		"grid": [
+			"############",
+			"#..........#",
+			"#...G..#...#",
+			"#......#...#",
+			"#......#...#",
+			"#......#...#",
+			"#......#...#",
+			"#..........#",
+			"############"
+		]
+	},
+	"inner_blue": {
+		"name": "Dalam Kotak Biru",
+		"theme": "blue",
+		"grid": [
+			"############",
+			"#..........#",
+			"#....#.....#",
+			"#....#.....#",
+			"E....#.....#",
+			"#....#.....#",
+			"#....#.....#",
+			"#..........#",
+			"############"
+		]
+	}
+}
 
-class Entity:
-	var type: String # "player" atau "box"
-	var pos: Vector2i
-	var room: Room
-	var inner_room: Room = null
-	var entry_dir: Vector2i = Vector2i.ZERO
-	var style: String # "green", "blue", "wood"
-
-	func _init(_type: String, _pos: Vector2i, _room: Room, _style: String):
-		type = _type
-		pos = _pos
-		room = _room
-		style = _style
-
-# ==========================================
-# VARIABEL GLOBAL & KAMERA VIRTUAL
-# ==========================================
-var rooms: Dictionary = {}
-var current_room: Room
-var player: Entity
-var target_crate: Entity # Satu peti kayu dari dalam box yang harus ditaruh di Goal
-var cam_offset: Vector2 = Vector2.ZERO
-var is_won: bool = false
+var game_state := {}
+var undo_stack: Array[Dictionary] = []
+var is_animating: bool = false
+var is_completed: bool = false
 var step_count: int = 0
 
-func _ready():
-	setup_tutorial_level()
-	snap_camera_to_player()
+var board_container: Node2D
+var hud_layer: CanvasLayer
+var hud_label: Label
+var hint_label: Label
+var step_panel: PanelContainer
+var step_label: Label
+var bg_rect: ColorRect
+var win_overlay: CanvasLayer
+var win_step_label: Label
 
-func snap_camera_to_player():
-	if player != null:
-		var vp_center = get_viewport_rect().size / 2.0
-		var p_world = Vector2(player.pos.x * TILE_SIZE + TILE_SIZE / 2.0, player.pos.y * TILE_SIZE + TILE_SIZE / 2.0)
-		cam_offset = vp_center - p_world
+func _ready() -> void:
+	_setup_hud()
+	_setup_win_overlay()
+	_reset_level()
 
-# ==========================================
-# SETUP LEVEL TUTORIAL (1 PETI DARI DALAM BOX)
-# ==========================================
-func setup_tutorial_level():
-	rooms.clear()
-	is_won = false
+# ==============================================================================
+# 3. INISIALISASI, UNDO & RESET LEVEL
+# ==============================================================================
+func _reset_level(play_sound: bool = false) -> void:
+	if play_sound:
+		Sfx.play("reset")
+	undo_stack.clear()
 	step_count = 0
-	
-	# 1. Ruangan Utama (Outer Room)
-	var outer = Room.new("RUANG LUAR (1/2)", "slate")
-	build_room_walls(outer)
-	
-	# Dinding pembatas di kanan sebagai sandaran untuk mementokkan Box Biru
-	for y in range(2, 7):
-		outer.grid[y][7] = TileType.WALL
-		
-	# Target kuning tempat meletakkan 1 peti kayu dari dalam box
-	outer.grid[2][4] = TileType.GOAL
-	
-	# 2. Ruangan Dalam Box Biru (Inner Room)
-	var inner = Room.new("DALAM BOX BIRU (2/2)", "blue")
-	build_room_walls(inner)
-	
-	# Pintu masuk & keluar berada di sisi KIRI (x = 0, y = 4)
-	inner.grid[4][0] = TileType.PORTAL_OUT
-	inner.entry_spawn = Vector2i(1, 4)
-	
-	# Sekat kecil di dalam ruangan biru
-	inner.grid[2][5] = TileType.WALL
-	inner.grid[3][5] = TileType.WALL
-	inner.grid[5][5] = TileType.WALL
-	inner.grid[6][5] = TileType.WALL
-	
-	# HANYA 1 KOTAK KAYU di dalam Box Biru yang harus dibawa keluar & ditaruh di Goal
-	target_crate = Entity.new("box", Vector2i(3, 4), inner, "wood")
-	inner.entities.append(target_crate)
-	
-	# 3. Box Rekursif Biru di Ruangan Utama (Lubang di sisi KIRI)
-	var paradox_box = Entity.new("box", Vector2i(4, 4), outer, "blue")
-	paradox_box.inner_room = inner
-	paradox_box.entry_dir = Vector2i.LEFT
-	inner.parent_box = paradox_box
-	outer.entities.append(paradox_box)
-	
-	# 4. Karakter Pemain di sisi kiri
-	player = Entity.new("player", Vector2i(2, 4), outer, "green")
-	outer.entities.append(player)
-	
-	rooms["Outer"] = outer
-	rooms["Inner"] = inner
-	current_room = outer
-	queue_redraw()
+	_update_step_hud()
+	is_completed = false
+	if win_overlay != null:
+		win_overlay.visible = false
 
-func build_room_walls(r: Room):
-	for y in range(GRID_H):
-		for x in range(GRID_W):
-			if x == 0 or x == GRID_W - 1 or y == 0 or y == GRID_H - 1:
-				r.grid[y][x] = TileType.WALL
-
-# ==========================================
-# INPUT & KONTROL (WASD + PANAH)
-# ==========================================
-func _unhandled_input(event):
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode in [KEY_W, KEY_UP]:
-			_gerak(Vector2i.UP)
-		elif event.keycode in [KEY_S, KEY_DOWN]:
-			_gerak(Vector2i.DOWN)
-		elif event.keycode in [KEY_A, KEY_LEFT]:
-			_gerak(Vector2i.LEFT)
-		elif event.keycode in [KEY_D, KEY_RIGHT]:
-			_gerak(Vector2i.RIGHT)
-		elif event.keycode == KEY_R:
-			Sfx.play("reset")
-			setup_tutorial_level()
-			snap_camera_to_player()
-		elif event.keycode == KEY_ESCAPE:
-			if ResourceLoader.exists("res://main_menu/main_menu.tscn"):
-				get_tree().change_scene_to_file("res://main_menu/main_menu.tscn")
-
-func _gerak(dir: Vector2i) -> void:
-	if is_won:
-		return
-	Sfx.play("move" if try_move(player, dir) else "blocked")
-
-# ==========================================
-# LOGIKA PERGERAKAN REKURSIF (MENTOK BARU MASUK)
-# ==========================================
-func try_move(entity: Entity, dir: Vector2i) -> bool:
-	if is_won:
-		return false
-		
-	var target_pos = entity.pos + dir
-	var r = entity.room
-	
-	# 1. Keluar batas ruangan (saat mendorong/berjalan melewati pintu keluar)
-	if target_pos.x < 0 or target_pos.x >= GRID_W or target_pos.y < 0 or target_pos.y >= GRID_H:
-		if r.parent_box != null:
-			return exit_box(entity, r.parent_box, dir)
-		return false
-		
-	var target_tile = r.grid[target_pos.y][target_pos.x]
-	if target_tile == TileType.WALL:
-		return false
-		
-	# 2. Cek jika menabrak entitas lain (Box)
-	var target_entity = get_entity_at(r, target_pos)
-	if target_entity != null:
-		# PRIORITAS 1: Dorong entitas terlebih dahulu jika masih ada ruang kosong di depannya
-		if try_move(target_entity, dir):
-			move_entity_to(entity, r, target_pos)
-			if entity == player: step_count += 1
-			check_win_condition()
-			return true
-		else:
-			# PRIORITAS 2: Jika box sudah MENTOK tembok/halangan, baru bisa masuk lewat lubangnya
-			if target_entity.inner_room != null and target_entity.entry_dir == -dir:
-				return enter_box(entity, target_entity, dir)
-			return false
-			
-	# 3. Pindah ke petak kosong / menginjak pintu keluar
-	move_entity_to(entity, r, target_pos)
-	if entity == player: step_count += 1
-	
-	if target_tile == TileType.PORTAL_OUT and r.parent_box != null and dir == r.parent_box.entry_dir:
-		exit_box(entity, r.parent_box, dir)
-		
-	check_win_condition()
-	return true
-
-func enter_box(entity: Entity, box: Entity, dir: Vector2i) -> bool:
-	var in_room = box.inner_room
-	var spawn_pos = in_room.entry_spawn
-	
-	var blocking = get_entity_at(in_room, spawn_pos)
-	if blocking != null:
-		if not try_move(blocking, dir):
-			return false
-			
-	move_entity_to(entity, in_room, spawn_pos)
-	if entity == player:
-		current_room = in_room
-		step_count += 1
-	return true
-
-func exit_box(entity: Entity, parent_box: Entity, dir: Vector2i) -> bool:
-	var out_room = parent_box.room
-	var exit_pos = parent_box.pos + dir
-	
-	if exit_pos.x < 0 or exit_pos.x >= GRID_W or exit_pos.y < 0 or exit_pos.y >= GRID_H:
-		return false
-		
-	if out_room.grid[exit_pos.y][exit_pos.x] == TileType.WALL:
-		return false
-		
-	var blocking = get_entity_at(out_room, exit_pos)
-	if blocking != null:
-		if not try_move(blocking, dir):
-			return false
-			
-	move_entity_to(entity, out_room, exit_pos)
-	if entity == player:
-		current_room = out_room
-	return true
-
-func move_entity_to(entity: Entity, new_room: Room, new_pos: Vector2i):
-	entity.room.entities.erase(entity)
-	entity.room = new_room
-	entity.pos = new_pos
-	new_room.entities.append(entity)
-	queue_redraw()
-
-func get_entity_at(r: Room, pos: Vector2i) -> Entity:
-	for e in r.entities:
-		if e.pos == pos:
-			return e
-	return null
-
-# Menang jika 1 peti kayu dari dalam box sudah ditaruh tepat di atas Goal Ruang Luar
-func check_win_condition():
-	if target_crate.room == rooms["Outer"] and rooms["Outer"].grid[target_crate.pos.y][target_crate.pos.x] == TileType.GOAL:
-		is_won = true
-		GameConfig.complete_level("tutorial")
-		Sfx.play("win")
-		queue_redraw()
-
-# ==========================================
-# KAMERA VIRTUAL & RENDER GAYA SPRITE SHEET
-# ==========================================
-func _process(delta):
-	if player == null:
-		return
-	var vp_center = get_viewport_rect().size / 2.0
-	var p_world = Vector2(player.pos.x * TILE_SIZE + TILE_SIZE / 2.0, player.pos.y * TILE_SIZE + TILE_SIZE / 2.0)
-	var target_offset = vp_center - p_world
-	cam_offset = cam_offset.lerp(target_offset, 12.0 * delta)
-	queue_redraw()
-
-func _draw():
-	if current_room == null:
-		return
-		
-	var vp_size = get_viewport_rect().size
-	draw_rect(Rect2(Vector2.ZERO, vp_size), COL_BG, true)
-	
-	draw_set_transform(cam_offset, 0.0, Vector2.ONE)
-	
-	var room_rect = Rect2(-6, -6, GRID_W * TILE_SIZE + 12, GRID_H * TILE_SIZE + 12)
-	_draw_rounded_box(room_rect, COL_FLOOR, COL_OUTLINE, 6.0, 14)
-	
-	# 1. Gambar Lantai, Tembok, Goal & Portal
-	for y in range(GRID_H):
-		for x in range(GRID_W):
-			var cell = Rect2(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-			var tile = current_room.grid[y][x]
-			
-			draw_circle(cell.get_center(), 2.5, COL_FLOOR_GRID)
-			
-			if tile == TileType.WALL:
-				var w_outer = PALETTE["blue_outer"] if current_room.theme == "blue" else PALETTE["wall_outer"]
-				var w_inner = PALETTE["blue_inner"] if current_room.theme == "blue" else PALETTE["wall_inner"]
-				_draw_bevel_tile(cell.grow(-2), w_outer, w_inner, 10)
-				
-			elif tile == TileType.GOAL:
-				_draw_goal_brackets(cell.grow(-8), PALETTE["yellow_outer"])
-				
-			elif tile == TileType.PORTAL_OUT:
-				var p_rect = cell.grow(-4)
-				_draw_rounded_box(p_rect, Color("#1c3b47"), PALETTE["blue_outer"], 3.0, 8)
-				_draw_arrow_icon(cell.get_center(), Vector2.LEFT, PALETTE["yellow_outer"], 12.0)
-				
-	# 2. Gambar Entitas (Player & Box)
-	for e in current_room.entities:
-		var box_rect = Rect2(e.pos.x * TILE_SIZE + 3, e.pos.y * TILE_SIZE + 3, TILE_SIZE - 6, TILE_SIZE - 6)
-		
-		if e.type == "player":
-			_draw_player_sprite(box_rect)
-		elif e.style == "wood":
-			_draw_crate_sprite(box_rect)
-		elif e.inner_room != null:
-			_draw_parabox_sprite(box_rect, e)
-			
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	_draw_parabox_ui()
-
-# ==========================================
-# HELPER GAMBAR GAYA ASET KARTUN TEBAL
-# ==========================================
-func _draw_rounded_box(rect: Rect2, fill_col: Color, border_col: Color, border_w: float, radius: int):
-	var sb = StyleBoxFlat.new()
-	sb.bg_color = fill_col
-	sb.border_color = border_col
-	sb.set_border_width_all(int(border_w))
-	sb.set_corner_radius_all(radius)
-	draw_style_box(sb, rect)
-
-func _draw_bevel_tile(rect: Rect2, outer_col: Color, inner_col: Color, radius: int):
-	_draw_rounded_box(rect, outer_col, COL_OUTLINE, 4.0, radius)
-	_draw_rounded_box(rect.grow(-10), inner_col, Color(0, 0, 0, 0.25), 2.0, max(4, radius - 4))
-
-func _draw_crate_sprite(rect: Rect2):
-	_draw_bevel_tile(rect, PALETTE["wood_outer"], PALETTE["wood_inner"], 10)
-	var inner = rect.grow(-12)
-	draw_line(inner.position, inner.end, PALETTE["wood_outer"], 5.0)
-	draw_line(Vector2(inner.end.x, inner.position.y), Vector2(inner.position.x, inner.end.y), PALETTE["wood_outer"], 5.0)
-
-func _draw_player_sprite(rect: Rect2):
-	_draw_rounded_box(rect, PALETTE["green_outer"], COL_OUTLINE, 4.5, 12)
-	var hl = Rect2(rect.position.x + 8, rect.position.y + 6, rect.size.x - 16, 5)
-	draw_rect(hl, Color(1, 1, 1, 0.28), true)
-	var cx = rect.get_center().x
-	var cy = rect.get_center().y - 2
-	_draw_rounded_box(Rect2(cx - 13, cy - 8, 7, 16), COL_OUTLINE, COL_OUTLINE, 1.0, 4)
-	_draw_rounded_box(Rect2(cx + 6, cy - 8, 7, 16), COL_OUTLINE, COL_OUTLINE, 1.0, 4)
-
-func _draw_parabox_sprite(rect: Rect2, e: Entity):
-	_draw_rounded_box(rect, PALETTE["blue_outer"], COL_OUTLINE, 4.5, 12)
-	var inner_rect = rect.grow(-11)
-	_draw_rounded_box(inner_rect, PALETTE["blue_inner"], COL_OUTLINE, 3.0, 6)
-	
-	if e.inner_room != null:
-		for sub_e in e.inner_room.entities:
-			var rel_x = float(sub_e.pos.x) / float(GRID_W)
-			var rel_y = float(sub_e.pos.y) / float(GRID_H)
-			var mini_pos = inner_rect.position + Vector2(rel_x * inner_rect.size.x, rel_y * inner_rect.size.y)
-			var mini_col = PALETTE["green_outer"] if sub_e.type == "player" else PALETTE["wood_outer"]
-			draw_rect(Rect2(mini_pos - Vector2(3, 3), Vector2(6, 6)), mini_col, true)
-	
-	if e.entry_dir == Vector2i.LEFT:
-		var hole_h = rect.size.y * 0.44
-		var hole = Rect2(rect.position.x - 2, rect.get_center().y - hole_h / 2.0, 14, hole_h)
-		draw_rect(hole, COL_FLOOR, true)
-		draw_line(hole.position, Vector2(hole.end.x, hole.position.y), COL_OUTLINE, 4.0)
-		draw_line(Vector2(hole.position.x, hole.end.y), hole.end, COL_OUTLINE, 4.0)
-
-func _draw_goal_brackets(rect: Rect2, col: Color):
-	var L = 14.0
-	var w = 5.0
-	var p1 = rect.position
-	var p2 = Vector2(rect.end.x, rect.position.y)
-	var p3 = Vector2(rect.position.x, rect.end.y)
-	var p4 = rect.end
-	
-	draw_line(p1, p1 + Vector2(L, 0), col, w)
-	draw_line(p1, p1 + Vector2(0, L), col, w)
-	draw_line(p2, p2 + Vector2(-L, 0), col, w)
-	draw_line(p2, p2 + Vector2(0, L), col, w)
-	draw_line(p3, p3 + Vector2(L, 0), col, w)
-	draw_line(p3, p3 + Vector2(0, -L), col, w)
-	draw_line(p4, p4 + Vector2(-L, 0), col, w)
-	draw_line(p4, p4 + Vector2(0, -L), col, w)
-
-func _draw_arrow_icon(center: Vector2, dir: Vector2, col: Color, size: float):
-	var pts = PackedVector2Array()
-	if dir == Vector2.RIGHT:
-		pts = [center + Vector2(-size*0.5, -size*0.6), center + Vector2(size*0.6, 0), center + Vector2(-size*0.5, size*0.6)]
-	elif dir == Vector2.LEFT:
-		pts = [center + Vector2(size*0.5, -size*0.6), center + Vector2(-size*0.6, 0), center + Vector2(size*0.5, size*0.6)]
-	elif dir == Vector2.UP:
-		pts = [center + Vector2(-size*0.6, size*0.5), center + Vector2(0, -size*0.6), center + Vector2(size*0.6, size*0.5)]
-	elif dir == Vector2.DOWN:
-		pts = [center + Vector2(-size*0.6, -size*0.5), center + Vector2(0, size*0.6), center + Vector2(size*0.6, -size*0.5)]
-	draw_colored_polygon(pts, col)
-
-# ==========================================
-# UI HUD & MODAL UCAPAN SELAMAT
-# ==========================================
-func _draw_parabox_ui():
-	var vp = get_viewport_rect().size
-	var font = ThemeDB.fallback_font
-	
-	# 1. Pill Header Kiri Atas
-	var badge_rect = Rect2(24, 20, 320, 48)
-	_draw_rounded_box(badge_rect, Color("#232736"), COL_OUTLINE, 4.0, 12)
-	var indicator_col = PALETTE["blue_outer"] if current_room.theme == "blue" else PALETTE["green_outer"]
-	_draw_rounded_box(Rect2(36, 32, 24, 24), indicator_col, COL_OUTLINE, 3.0, 6)
-	draw_string(font, Vector2(72, 50), current_room.id, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
-	
-	# 2. Pill Counter Langkah di Kanan Atas
-	var step_rect = Rect2(vp.x - 184, 20, 160, 48)
-	_draw_rounded_box(step_rect, Color("#232736"), COL_OUTLINE, 4.0, 12)
-	draw_string(font, Vector2(step_rect.position.x + 22, 50), "LANGKAH: %d" % step_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, PALETTE["yellow_outer"])
-	
-	# 3. Petunjuk Instruksi Kontekstual di Bawah Layar
-	var tip_text = "Dorong box BIRU ke tembok, masuk ke dalamnya, dan taruh peti kayu ke target kuning!"
-	if current_room.theme == "blue":
-		tip_text = "Dorong peti kayu keluar lewat pintu KIRI, lalu ikuti keluar menuju target kuning!"
-	elif target_crate.room == rooms["Outer"]:
-		tip_text = "Bagus! Sekarang dorong peti kayu tersebut ke petak target kuning!"
-		
-	var tip_w = 620.0
-	var tip_rect = Rect2(vp.x / 2.0 - tip_w / 2.0 + 70.0, vp.y - 68, tip_w, 44)
-	_draw_rounded_box(tip_rect, Color("#232736"), COL_OUTLINE, 4.0, 12)
-	draw_string(font, Vector2(tip_rect.position.x + 18, tip_rect.position.y + 28), tip_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#f1f2f6"))
-	
-	# 4. Ikon Keycap Tombol Kontrol di Pojok Kiri Bawah
-	var keys = [
-		{"lbl": "WASD", "desc": "Gerak", "w": 56.0},
-		{"lbl": "R", "desc": "Ulang", "w": 36.0},
-		{"lbl": "ESC", "desc": "Menu", "w": 44.0}
-	]
-	var kx = 24.0
-	for k in keys:
-		var k_rect = Rect2(kx, vp.y - 64, k["w"], 38)
-		_draw_rounded_box(k_rect, Color("#2e3346"), COL_OUTLINE, 3.5, 8)
-		draw_string(font, Vector2(kx + 8, vp.y - 40), k["lbl"], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
-		draw_string(font, Vector2(kx + k["w"] + 6, vp.y - 40), k["desc"], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#8395a7"))
-		kx += k["w"] + 54.0
-		
-	# 5. Modal Ucapan Selamat saat Selesai
-	if is_won:
-		draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.65), true)
-		var card_w = 480.0
-		var card_h = 250.0
-		var card = Rect2(vp.x / 2.0 - card_w / 2.0, vp.y / 2.0 - card_h / 2.0, card_w, card_h)
-		
-		# Dekorasi konfeti kotak warna-warni di sekitar kartu
-		var confetti_cols = [PALETTE["yellow_outer"], PALETTE["green_outer"], PALETTE["blue_outer"], PALETTE["red_outer"], PALETTE["purple_outer"]]
-		var confetti_offsets = [
-			Vector2(-25, -20), Vector2(card_w + 15, -15), Vector2(-30, card_h + 10),
-			Vector2(card_w + 20, card_h + 15), Vector2(card_w * 0.25, -28), Vector2(card_w * 0.75, -24)
+	game_state = {
+		"active_room": "outer",
+		"player": {
+			"room": "outer",
+			"pos": Vector2i(2, 4),
+			"path": []
+		},
+		"boxes": [
+			{
+				"id": "box_blue",
+				"room": "outer",
+				"pos": Vector2i(4, 4),
+				"color": "blue",
+				"target_room": "inner_blue"
+			},
+			{
+				"id": "crate",
+				"room": "inner_blue",
+				"pos": Vector2i(3, 4),
+				"color": "yellow",
+				"target_room": ""
+			}
 		]
-		for i in range(confetti_offsets.size()):
-			var c_pos = card.position + confetti_offsets[i]
-			_draw_rounded_box(Rect2(c_pos, Vector2(14, 14)), confetti_cols[i % confetti_cols.size()], COL_OUTLINE, 2.5, 4)
-		
-		# Kartu utama
-		_draw_rounded_box(card, Color("#232736"), COL_OUTLINE, 6.0, 18)
-		_draw_rounded_box(card.grow(-8), Color("#232736"), PALETTE["yellow_outer"], 3.0, 12)
-		
-		draw_string(font, Vector2(card.position.x + 88, card.position.y + 62), "SELAMAT! KAMU BERHASIL!", HORIZONTAL_ALIGNMENT_LEFT, -1, 24, PALETTE["yellow_outer"])
-		draw_string(font, Vector2(card.position.x + 56, card.position.y + 98), "Kamu telah menyelesaikan tutorial dasar Parabox.", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
-		draw_string(font, Vector2(card.position.x + 155, card.position.y + 132), "Total Langkah: %d" % step_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, PALETTE["green_outer"])
-		
-		# Tombol aksi
-		var btn_r = Rect2(card.position.x + 55, card.position.y + 170, 170, 44)
-		var btn_m = Rect2(card.position.x + 255, card.position.y + 170, 170, 44)
-		_draw_rounded_box(btn_r, PALETTE["green_outer"], COL_OUTLINE, 4.0, 10)
-		_draw_rounded_box(btn_m, PALETTE["blue_outer"], COL_OUTLINE, 4.0, 10)
-		draw_string(font, Vector2(btn_r.position.x + 22, btn_r.position.y + 28), "[R] MAIN LAGI", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, COL_OUTLINE)
-		draw_string(font, Vector2(btn_m.position.x + 26, btn_m.position.y + 28), "[ESC] MENU", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, COL_OUTLINE)
+	}
+	_rebuild_visuals("none")
+
+func _save_undo() -> void:
+	var snap: Dictionary = game_state.duplicate(true)
+	snap["step_count"] = step_count
+	undo_stack.append(snap)
+
+func _undo_move() -> void:
+	if undo_stack.is_empty() or is_animating or is_completed:
+		return
+	var prev: Dictionary = undo_stack.pop_back()
+	if prev.has("step_count"):
+		step_count = prev["step_count"]
+	game_state = prev
+	_update_step_hud()
+	Sfx.play("undo")
+	_rebuild_visuals("none")
+
+# ==============================================================================
+# 4. INPUT KEYBOARD
+# ==============================================================================
+func _unhandled_input(event: InputEvent) -> void:
+	if is_animating:
+		return
+
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_ESCAPE:
+			_go_to_main_menu()
+			return
+		if event.keycode == KEY_R:
+			_reset_level(true)
+			return
+		if is_completed:
+			if event.keycode == KEY_ENTER or event.keycode == KEY_SPACE:
+				_go_to_level1()
+			return
+
+		match event.keycode:
+			KEY_UP, KEY_W:        _try_move_player(Vector2i(0, -1))
+			KEY_DOWN, KEY_S:      _try_move_player(Vector2i(0, 1))
+			KEY_LEFT, KEY_A:      _try_move_player(Vector2i(-1, 0))
+			KEY_RIGHT, KEY_D:     _try_move_player(Vector2i(1, 0))
+			KEY_Z, KEY_BACKSPACE: _undo_move()
+
+# ==============================================================================
+# 5. LOGIKA PERMAINAN
+# ==============================================================================
+func _try_move_player(dir: Vector2i) -> void:
+	if is_completed:
+		return
+	var p: Dictionary = game_state["player"]
+	var old_room: String = p["room"]
+	var old_pos: Vector2i = p["pos"]
+	var old_depth: int = p["path"].size()
+	var boxes_before: Array = _snapshot_boxes()
+
+	_save_undo()
+	var res: Dictionary = _resolve_move(old_room, p["pos"] + dir, dir, 0, false, p["path"])
+	if res.is_empty():
+		undo_stack.pop_back()
+		Sfx.play("blocked")
+		return
+
+	p["room"] = res["room"]
+	p["pos"] = res["pos"]
+	p["path"] = res["path"]
+	game_state["active_room"] = res["room"]
+	step_count += 1
+	_update_step_hud()
+
+	var transition := "move"
+	if res["room"] != old_room:
+		transition = "enter" if res["path"].size() > old_depth else "exit"
+
+	match transition:
+		"enter": Sfx.play("enter")
+		"exit":  Sfx.play("exit")
+		_:       Sfx.play("push" if _boxes_changed(boxes_before) else "move")
+
+	await _rebuild_visuals(transition, old_pos, dir, boxes_before)
+	_check_win_condition()
+
+func _snapshot_boxes() -> Array:
+	var snap: Array = []
+	for box in game_state["boxes"]:
+		snap.append({"id": box["id"], "room": box["room"], "pos": box["pos"]})
+	return snap
+
+func _boxes_changed(before: Array) -> bool:
+	for b in before:
+		var now: Dictionary = _get_box_by_id(b["id"])
+		if now.is_empty(): continue
+		if now["room"] != b["room"] or now["pos"] != b["pos"]: return true
+	return false
+
+func _resolve_move(room: String, pos: Vector2i, dir: Vector2i, depth: int, mover_is_box: bool, path: Array) -> Dictionary:
+	if depth > MAX_DEPTH: return {}
+	var tile: String = _tile_at(room, pos)
+	if tile == "" or tile == "#": return {}
+
+	if tile == "E":
+		if not _is_exit_dir(room, pos, dir): return {}
+		var parent: Dictionary = _find_parent_box(room, path)
+		if parent.is_empty(): return {}
+		var new_path: Array = path.duplicate()
+		if not new_path.is_empty() and new_path.back() == parent["id"]:
+			new_path.pop_back()
+		return _resolve_move(parent["room"], parent["pos"] + dir, dir, depth + 1, mover_is_box, new_path)
+
+	var box: Dictionary = _get_box_at(room, pos)
+	if box.is_empty():
+		if mover_is_box and game_state["player"]["room"] == room and game_state["player"]["pos"] == pos:
+			return {}
+		return {"room": room, "pos": pos, "path": path}
+
+	var pushed: Dictionary = _resolve_move(box["room"], pos + dir, dir, depth + 1, true, path)
+	if not pushed.is_empty():
+		box["room"] = pushed["room"]
+		box["pos"] = pushed["pos"]
+		return {"room": room, "pos": pos, "path": path}
+
+	if box["target_room"] != "":
+		var entry: Vector2i = _entry_pos(box["target_room"], dir)
+		if entry != INVALID_POS:
+			var in_path: Array = path
+			if not mover_is_box: in_path = path + [box["id"]]
+			return _resolve_move(box["target_room"], entry, dir, depth + 1, mover_is_box, in_path)
+	return {}
+
+# ==============================================================================
+# 6. VISUALS
+# ==============================================================================
+func _calc_tile_size(rows: int, cols: int, vp: Vector2) -> float:
+	var avail := Vector2(vp.x * 0.92, vp.y - 120.0)
+	var fit: float = floorf(minf(avail.x / float(cols), avail.y / float(rows)))
+	return clampf(fit, 24.0, float(TILE_SIZE))
+
+func _rebuild_visuals(transition: String, dash_from: Vector2i = INVALID_POS, dash_dir: Vector2i = Vector2i.ZERO, boxes_before: Array = []) -> void:
+	if board_container != null: board_container.queue_free()
+	board_container = Node2D.new()
+	add_child(board_container)
+
+	var active_r: String = game_state["active_room"]
+	var room_data: Dictionary = rooms[active_r]
+	var grid: Array = room_data["grid"]
+	var theme: String = room_data["theme"]
+	var rows_count: int = grid.size()
+	var cols_count: int = grid[0].length()
+
+	bg_rect.color = themes[theme]["bg"]
+	var vp_size: Vector2 = get_viewport_rect().size
+	var ts: float = _calc_tile_size(rows_count, cols_count, vp_size)
+	board_container.position = vp_size / 2.0 + Vector2(0.0, 14.0)
+	var origin := -Vector2(cols_count, rows_count) * ts / 2.0 + Vector2(ts / 2.0, ts / 2.0)
+
+	for y in range(rows_count):
+		for x in range(cols_count):
+			var ch: String = grid[y][x]
+			var nb: Array = [_is_solid(active_r, Vector2i(x, y - 1)), _is_solid(active_r, Vector2i(x, y + 1)), _is_solid(active_r, Vector2i(x - 1, y)), _is_solid(active_r, Vector2i(x + 1, y))]
+			var door_dir := Vector2i.ZERO
+			if ch == "E":
+				if x == 0: door_dir = Vector2i(-1, 0)
+				elif x == cols_count - 1: door_dir = Vector2i(1, 0)
+				elif y == 0: door_dir = Vector2i(0, -1)
+				elif y == rows_count - 1: door_dir = Vector2i(0, 1)
+			var tile_node := ProceduralTile.new(ch, theme, ts, palette, themes, nb, door_dir)
+			tile_node.position = origin + Vector2(x, y) * ts
+			board_container.add_child(tile_node)
+
+	for box in game_state["boxes"]:
+		if box["room"] != active_r: continue
+		var box_node := ProceduralBox.new(box["color"], box["target_room"], rooms, themes, game_state["boxes"], game_state["player"], ts - 4.0, palette)
+		var box_target: Vector2 = origin + Vector2(box["pos"].x, box["pos"].y) * ts
+		var box_start: Vector2i = _old_box_pos(boxes_before, box)
+		board_container.add_child(box_node)
+		if box_start != INVALID_POS and box_start != box["pos"]:
+			box_node.position = origin + Vector2(box_start.x, box_start.y) * ts
+			box_node.create_tween().tween_property(box_node, "position", box_target, MOVE_DURATION * 1.15).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		else: box_node.position = box_target
+
+	var is_nested: bool = (active_r != "outer")
+	var player_node := ProceduralPlayer.new(is_nested, ts - 8.0, palette)
+	var p_pos: Vector2i = game_state["player"]["pos"]
+	var p_start: Vector2i = p_pos
+	if transition == "move" and dash_from != INVALID_POS:
+		p_start = dash_from
+		if p_start != p_pos: _spawn_dash_trail(origin + Vector2(p_start.x, p_start.y) * ts, origin + Vector2(p_pos.x, p_pos.y) * ts, ts - 8.0, is_nested)
+	player_node.position = origin + Vector2(p_start.x, p_start.y) * ts
+	board_container.add_child(player_node)
+
+	hud_label.text = "%s   |   [WASD/Panah] Gerak   •   [Z] Undo   •   [R] Reset   •   [ESC] Menu" % room_data["name"]
+	_update_tutorial_hint()
+
+	if transition == "enter":
+		is_animating = true
+		board_container.scale = Vector2(0.25, 0.25); board_container.modulate.a = 0.0
+		var tw_in := create_tween().set_parallel(true)
+		tw_in.tween_property(board_container, "scale", Vector2.ONE, ZOOM_DURATION).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw_in.tween_property(board_container, "modulate:a", 1.0, ZOOM_DURATION * 0.7)
+		await tw_in.finished; is_animating = false
+	elif transition == "exit":
+		is_animating = true
+		board_container.scale = Vector2(2.4, 2.4); board_container.modulate.a = 0.0
+		var tw_out := create_tween().set_parallel(true)
+		tw_out.tween_property(board_container, "scale", Vector2.ONE, ZOOM_DURATION).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw_out.tween_property(board_container, "modulate:a", 1.0, ZOOM_DURATION * 0.7)
+		await tw_out.finished; is_animating = false
+	elif transition == "move":
+		is_animating = true
+		var target: Vector2 = origin + Vector2(p_pos.x, p_pos.y) * ts
+		var stretch := Vector2(1.22, 0.84) if dash_dir.y == 0 else Vector2(0.84, 1.22)
+		player_node.scale = stretch
+		var tw := create_tween()
+		tw.tween_property(player_node, "position", target, MOVE_DURATION).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		var squash := player_node.create_tween()
+		squash.tween_property(player_node, "scale", Vector2(0.93, 1.07), MOVE_DURATION * 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		squash.tween_property(player_node, "scale", Vector2.ONE, MOVE_DURATION * 0.55).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		await tw.finished; is_animating = false
+
+func _update_tutorial_hint() -> void:
+	if hint_label == null:
+		return
+	var crate: Dictionary = _get_box_by_id("crate")
+	if game_state["active_room"] == "inner_blue":
+		hint_label.text = "Petunjuk: Dorong peti kuning keluar lewat pintu kiri, lalu ikuti keluar menuju target."
+	elif not crate.is_empty() and crate["room"] == "outer":
+		hint_label.text = "Petunjuk: Bagus! Sekarang dorong peti kuning ke kotak target di ruang luar."
+	else:
+		hint_label.text = "Petunjuk: Dorong kotak biru sampai mentok ke dinding, masuk dari kiri, dan ambil peti kuning di dalamnya."
+
+func _old_box_pos(before: Array, box: Dictionary) -> Vector2i:
+	for b in before:
+		if b["id"] == box["id"] and b["room"] == box["room"]: return b["pos"]
+	return INVALID_POS
+
+func _spawn_dash_trail(from_pos: Vector2, to_pos: Vector2, sz: float, nested: bool) -> void:
+	for i in range(DASH_TRAIL_COUNT):
+		var t: float = float(i + 1) / float(DASH_TRAIL_COUNT + 1)
+		var ghost := ProceduralPlayer.new(nested, sz, palette)
+		ghost.position = from_pos.lerp(to_pos, t); ghost.modulate.a = 0.34 * (1.0 - t * 0.55)
+		var skala: float = 1.0 - 0.16 * t; ghost.scale = Vector2(skala, skala)
+		board_container.add_child(ghost)
+		var tw := ghost.create_tween().set_parallel(true)
+		tw.tween_property(ghost, "modulate:a", 0.0, DASH_TRAIL_DURATION)
+		tw.tween_property(ghost, "scale", Vector2(skala * 0.55, skala * 0.55), DASH_TRAIL_DURATION)
+		tw.chain().tween_callback(ghost.queue_free)
+
+# ==============================================================================
+# 7. WIN CONDITION
+# ==============================================================================
+func _check_win_condition() -> void:
+	for room_id in rooms.keys():
+		var grid: Array = rooms[room_id]["grid"]
+		for y in range(grid.size()):
+			for x in range(grid[y].length()):
+				var ch: String = grid[y][x]
+				if ch == "G":
+					var on_goal: Dictionary = _get_box_at(room_id, Vector2i(x, y))
+					if on_goal.is_empty() or on_goal["target_room"] != "": return
+				if ch == "P":
+					var pl: Dictionary = game_state["player"]
+					if pl["room"] != room_id or pl["pos"] != Vector2i(x, y): return
+	is_completed = true
+	_update_step_hud()
+	win_overlay.visible = true
+	GameConfig.complete_level("tutorial")
+	Sfx.play("win")
+
+func _setup_win_overlay() -> void:
+	win_overlay = CanvasLayer.new()
+	win_overlay.layer = 10
+	win_overlay.visible = false
+	add_child(win_overlay)
+
+	var backdrop := ColorRect.new()
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.color = Color(0.05, 0.06, 0.09, 0.82)
+	win_overlay.add_child(backdrop)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(480, 0)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("#1a1d2b")
+	sb.border_color = palette["yellow"]
+	sb.set_border_width_all(3)
+	sb.set_corner_radius_all(16)
+	sb.set_content_margin_all(32)
+	panel.add_theme_stylebox_override("panel", sb)
+	center.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	panel.add_child(vbox)
+
+	var badge := Label.new()
+	badge.text = "★ TUTORIAL BERHASIL ★"
+	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	badge.add_theme_color_override("font_color", palette["blue_light"])
+	badge.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(badge)
+
+	var title := Label.new()
+	title.text = "SELAMAT!"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_color_override("font_color", palette["yellow"])
+	title.add_theme_font_size_override("font_size", 38)
+	vbox.add_child(title)
+
+	var msg := Label.new()
+	msg.text = "Kamu telah menyelesaikan tutorial dasar Parabox!\nSekarang kamu siap menaklukkan ruangan bersarang."
+	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	msg.add_theme_color_override("font_color", palette["text"])
+	msg.add_theme_font_size_override("font_size", 15)
+	vbox.add_child(msg)
+
+	win_step_label = Label.new()
+	win_step_label.text = "Total Langkah: 0"
+	win_step_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	win_step_label.add_theme_color_override("font_color", palette["teal"])
+	win_step_label.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(win_step_label)
+
+	var next_btn := Button.new()
+	next_btn.text = "  Lanjut ke Level 1 ▶  "
+	next_btn.custom_minimum_size = Vector2(0, 52)
+	var n_sb := StyleBoxFlat.new()
+	n_sb.bg_color = palette["teal"]
+	n_sb.set_corner_radius_all(8)
+	next_btn.add_theme_stylebox_override("normal", n_sb)
+	next_btn.add_theme_color_override("font_color", Color("#0d0f14"))
+	next_btn.add_theme_font_size_override("font_size", 16)
+	next_btn.pressed.connect(_go_to_level1)
+	vbox.add_child(next_btn)
+
+	var btn_box := HBoxContainer.new()
+	btn_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_box.add_theme_constant_override("separation", 14)
+	vbox.add_child(btn_box)
+
+	var retry_btn := Button.new()
+	retry_btn.text = "  ↺ Ulangi Level (R)  "
+	retry_btn.custom_minimum_size = Vector2(0, 46)
+	retry_btn.pressed.connect(func(): _reset_level(true))
+	btn_box.add_child(retry_btn)
+
+	var menu_btn := Button.new()
+	menu_btn.text = "  ▶ Kembali ke Menu Utama  "
+	menu_btn.custom_minimum_size = Vector2(0, 46)
+	var m_sb := StyleBoxFlat.new()
+	m_sb.bg_color = palette["blue"]
+	m_sb.set_corner_radius_all(8)
+	menu_btn.add_theme_stylebox_override("normal", m_sb)
+	menu_btn.add_theme_color_override("font_color", Color("#0d0f14"))
+	menu_btn.pressed.connect(_go_to_main_menu)
+	btn_box.add_child(menu_btn)
+
+func _go_to_level1() -> void:
+	if ResourceLoader.exists(LEVEL1_PATH):
+		get_tree().change_scene_to_file(LEVEL1_PATH)
+
+func _go_to_main_menu() -> void:
+	if ResourceLoader.exists(MAIN_MENU_PATH):
+		get_tree().change_scene_to_file(MAIN_MENU_PATH)
+
+# ==============================================================================
+# 8. HELPERS
+# ==============================================================================
+func _tile_at(room_id: String, pos: Vector2i) -> String:
+	var grid: Array = rooms[room_id]["grid"]
+	if pos.y < 0 or pos.y >= grid.size() or pos.x < 0 or pos.x >= grid[0].length(): return ""
+	return grid[pos.y][pos.x]
+
+func _is_solid(room_id: String, pos: Vector2i) -> bool:
+	var t: String = _tile_at(room_id, pos)
+	return t == "" or t == "#"
+
+func _is_exit_dir(room_id: String, pos: Vector2i, dir: Vector2i) -> bool:
+	var grid: Array = rooms[room_id]["grid"]
+	var h: int = grid.size(); var w: int = grid[0].length()
+	return (pos.x == 0 and dir == Vector2i(-1, 0)) or (pos.x == w - 1 and dir == Vector2i(1, 0)) or (pos.y == 0 and dir == Vector2i(0, -1)) or (pos.y == h - 1 and dir == Vector2i(0, 1))
+
+func _entry_pos(room_id: String, dir: Vector2i) -> Vector2i:
+	var grid: Array = rooms[room_id]["grid"]; var h: int = grid.size(); var w: int = grid[0].length()
+	for y in range(h):
+		for x in range(w):
+			if grid[y][x] != "E": continue
+			if dir == Vector2i(1, 0) and x == 0: return Vector2i(x + 1, y)
+			if dir == Vector2i(-1, 0) and x == w - 1: return Vector2i(x - 1, y)
+			if dir == Vector2i(0, 1) and y == 0: return Vector2i(x, y + 1)
+			if dir == Vector2i(0, -1) and y == h - 1: return Vector2i(x, y - 1)
+	return INVALID_POS
+
+func _get_box_at(room_id: String, pos: Vector2i) -> Dictionary:
+	for box in game_state["boxes"]:
+		if box["room"] == room_id and box["pos"] == pos: return box
+	return {}
+
+func _get_box_by_id(box_id) -> Dictionary:
+	for box in game_state["boxes"]:
+		if box["id"] == box_id: return box
+	return {}
+
+func _find_parent_box(room_id: String, path: Array) -> Dictionary:
+	if not path.is_empty():
+		var preferred: Dictionary = _get_box_by_id(path.back())
+		if not preferred.is_empty() and preferred["target_room"] == room_id: return preferred
+	for box in game_state["boxes"]:
+		if box["target_room"] == room_id: return box
+	return {}
+
+func _setup_hud() -> void:
+	var bg_layer := CanvasLayer.new()
+	bg_layer.layer = -1
+	add_child(bg_layer)
+
+	bg_rect = ColorRect.new()
+	bg_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg_rect.color = palette["bg"]
+	bg_layer.add_child(bg_rect)
+
+	hud_layer = CanvasLayer.new()
+	hud_layer.layer = 5
+	add_child(hud_layer)
+
+	hud_label = Label.new()
+	hud_label.position = Vector2(36, 28)
+	hud_label.add_theme_font_size_override("font_size", 17)
+	hud_label.add_theme_color_override("font_color", palette["wall_highlight"])
+	hud_layer.add_child(hud_label)
+
+	step_panel = PanelContainer.new()
+	step_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	step_panel.anchor_left = 1.0
+	step_panel.anchor_right = 1.0
+	step_panel.offset_left = -196
+	step_panel.offset_top = 20
+	step_panel.offset_right = -36
+	step_panel.offset_bottom = 60
+	var sb_step := StyleBoxFlat.new()
+	sb_step.bg_color = Color("#1a1d2b")
+	sb_step.border_color = palette["yellow"]
+	sb_step.set_border_width_all(2)
+	sb_step.set_corner_radius_all(12)
+	sb_step.set_content_margin_all(8)
+	sb_step.content_margin_left = 16
+	sb_step.content_margin_right = 16
+	step_panel.add_theme_stylebox_override("panel", sb_step)
+
+	step_label = Label.new()
+	step_label.text = "LANGKAH: 0"
+	step_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	step_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	step_label.add_theme_font_size_override("font_size", 15)
+	step_label.add_theme_color_override("font_color", palette["yellow"])
+	step_panel.add_child(step_label)
+	hud_layer.add_child(step_panel)
+
+	hint_label = Label.new()
+	hint_label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	hint_label.offset_top = -42
+	hint_label.offset_bottom = -16
+	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_label.add_theme_font_size_override("font_size", 15)
+	hint_label.add_theme_color_override("font_color", palette["wall_highlight"])
+	hud_layer.add_child(hint_label)
+
+func _update_step_hud() -> void:
+	if step_label != null: step_label.text = "LANGKAH: %d" % step_count
+	if win_step_label != null: win_step_label.text = "Total Langkah: %d" % step_count
+
+# ==============================================================================
+# 9. INNER CLASSES
+# ==============================================================================
+class ProceduralTile extends Node2D:
+	var type: String; var theme: String; var sz: float; var pal: Dictionary; var themes: Dictionary; var nb: Array; var door_dir: Vector2i
+	func _init(p_type: String, p_theme: String, p_sz: float, p_pal: Dictionary, p_themes: Dictionary, p_nb: Array, p_door_dir: Vector2i) -> void:
+		type = p_type; theme = p_theme; sz = p_sz; pal = p_pal; themes = p_themes; nb = p_nb; door_dir = p_door_dir
+	func _draw() -> void:
+		var half: float = sz / 2.0; var rect := Rect2(Vector2(-half, -half), Vector2(sz, sz)); var th: Dictionary = themes[theme]
+		var wall_col: Color = th["wall"]; var floor_col: Color = th["floor"]; var lit_col: Color = th["light"]; var band: float = maxf(4.0, sz * 0.09)
+		if type == "#":
+			draw_rect(rect, wall_col, true)
+			if not nb[0]: draw_rect(Rect2(Vector2(-half, -half), Vector2(sz, band)), lit_col, true)
+			if not nb[1]: draw_rect(Rect2(Vector2(-half, half - band), Vector2(sz, band)), lit_col, true)
+			if not nb[2]: draw_rect(Rect2(Vector2(-half, -half), Vector2(band, sz)), lit_col, true)
+			if not nb[3]: draw_rect(Rect2(Vector2(half - band, -half), Vector2(band, sz)), lit_col, true)
+			return
+		draw_rect(rect, floor_col, true); var shade := Color(0, 0, 0, 0.20); var sh: float = band * 1.4
+		if nb[0]: draw_rect(Rect2(Vector2(-half, -half), Vector2(sz, sh)), shade, true)
+		if nb[1]: draw_rect(Rect2(Vector2(-half, half - sh), Vector2(sz, sh)), shade, true)
+		if nb[2]: draw_rect(Rect2(Vector2(-half, -half), Vector2(sh, sz)), shade, true)
+		if nb[3]: draw_rect(Rect2(Vector2(half - sh, -half), Vector2(sh, sz)), shade, true)
+		if type == "G": draw_rect(Rect2(Vector2(-sz * 0.34, -sz * 0.34), Vector2(sz * 0.68, sz * 0.68)), lit_col, false, 4.0)
+		elif type == "P": draw_rect(Rect2(Vector2(-sz * 0.34, -sz * 0.34), Vector2(sz * 0.68, sz * 0.68)), lit_col, false, 4.0); draw_circle(Vector2(-sz * 0.13, sz * 0.03), sz * 0.045, lit_col); draw_circle(Vector2(sz * 0.13, sz * 0.03), sz * 0.045, lit_col)
+		elif type == "E":
+			var thick: float = 10.0; var long_side: float = sz * 0.56; var r: Rect2
+			if door_dir.x == -1: r = Rect2(Vector2(-half, -long_side / 2.0), Vector2(thick, long_side))
+			elif door_dir.x == 1: r = Rect2(Vector2(half - thick, -long_side / 2.0), Vector2(thick, long_side))
+			elif door_dir.y == -1: r = Rect2(Vector2(-long_side / 2.0, -half), Vector2(long_side, thick))
+			else: r = Rect2(Vector2(-long_side / 2.0, half - thick), Vector2(long_side, thick))
+			draw_rect(r, pal["yellow"], true)
+
+class ProceduralBox extends Node2D:
+	var color_name: String; var target_room: String; var rooms: Dictionary; var themes: Dictionary; var boxes: Array; var player: Dictionary; var sz: float; var pal: Dictionary
+	func _init(p_col: String, p_target: String, p_rooms: Dictionary, p_themes: Dictionary, p_boxes: Array, p_player: Dictionary, p_sz: float, p_pal: Dictionary) -> void:
+		color_name = p_col; target_room = p_target; rooms = p_rooms; themes = p_themes; boxes = p_boxes; player = p_player; sz = p_sz; pal = p_pal
+	func _draw() -> void:
+		var half: float = sz / 2.0; var main_col: Color = pal[color_name]
+		draw_rect(Rect2(Vector2(-half, -half), Vector2(sz, sz)), main_col.darkened(0.30), true)
+		var body := Rect2(Vector2(-half + 3, -half + 3), Vector2(sz - 6, sz - 6)); draw_rect(body, main_col, true)
+		if target_room != "": _draw_room_preview(target_room, body.grow(-sz * 0.08), 0)
+	func _draw_room_preview(room_id: String, area: Rect2, depth: int) -> void:
+		var grid: Array = rooms[room_id]["grid"]; var th: Dictionary = themes[rooms[room_id]["theme"]]
+		var floor_col: Color = th["floor"]; var wall_col: Color = th["wall"]; var lit_col: Color = th["light"]; var r_cnt: int = grid.size(); var c_cnt: int = grid[0].length(); var cell := Vector2(area.size.x / float(c_cnt), area.size.y / float(r_cnt))
+		draw_rect(area, floor_col, true)
+		for y in range(r_cnt):
+			for x in range(c_cnt):
+				var ch: String = grid[y][x]
+				if ch == "#": draw_rect(Rect2(area.position + Vector2(x * cell.x, y * cell.y), cell + Vector2(0.6, 0.6)), wall_col, true)
+				elif ch == "G" or ch == "P": draw_rect(Rect2(area.position + Vector2(x * cell.x, y * cell.y), cell).grow(-cell.x * 0.15), lit_col, false, 1.0)
+		for ib in boxes:
+			if ib["room"] != room_id: continue
+			var b_rect := Rect2(area.position + Vector2(ib["pos"].x * cell.x, ib["pos"].y * cell.y), cell).grow(-cell.x * 0.06); draw_rect(b_rect, pal[ib["color"]], true)
+			if ib["target_room"] != "" and depth < 2 and b_rect.size.x > 6.0: _draw_room_preview(ib["target_room"], b_rect.grow(-b_rect.size.x * 0.10), depth + 1)
+		if player["room"] == room_id: draw_rect(Rect2(area.position + Vector2(player["pos"].x * cell.x, player["pos"].y * cell.y), cell).grow(-cell.x * 0.1), pal["pink"], true)
+
+class ProceduralPlayer extends Node2D:
+	var is_nested: bool; var sz: float; var pal: Dictionary
+	func _init(p_nested: bool, p_sz: float, p_pal: Dictionary) -> void:
+		is_nested = p_nested; sz = p_sz; pal = p_pal
+	func _draw() -> void:
+		var half: float = sz / 2.0; var main_col: Color = pal["pink"]
+		draw_rect(Rect2(Vector2(-half, -half), Vector2(sz, sz)), main_col.darkened(0.30), true)
+		var body := Rect2(Vector2(-half + 3, -half + 3), Vector2(sz - 6, sz - 6)); draw_rect(body, main_col, true)
+		if is_nested: draw_rect(body.grow(-sz * 0.12), pal["pink_inner"], true); draw_rect(body.grow(-sz * 0.19), main_col, true)
+		var eye_x: float = sz * 0.17; draw_circle(Vector2(-eye_x, sz * 0.03), sz * 0.06, pal["outline"]); draw_circle(Vector2(eye_x, sz * 0.03), sz * 0.06, pal["outline"])

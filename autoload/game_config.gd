@@ -10,9 +10,12 @@ const PROGRESS_PATH: String = "user://progress.json"
 const PROGRESS_VERSION: int = 1
 
 signal fullscreen_changed(value: bool)
+signal settings_changed
 
 var muted: bool = false
 var sfx_volume: float = 0.85
+var music_muted: bool = false
+var music_volume: float = 0.35
 var fullscreen: bool = false
 
 # Id level terakhir yang diselesaikan. "" berarti belum ada progres.
@@ -40,6 +43,62 @@ var levels: Array = [
 		"subtitle": "Gua Bersarang",
 		"path": "res://level2/level2.tscn",
 		"accent": "teal"
+	},
+	{
+		"id": "level3",
+		"title": "LEVEL 3",
+		"subtitle": "Lorong Dimensi",
+		"path": "res://level3/level3.tscn",
+		"accent": "purple"
+	},
+	{
+		"id": "level4",
+		"title": "LEVEL 4",
+		"subtitle": "Dua Kotak Biru",
+		"path": "res://level4/level4.tscn",
+		"accent": "white"
+	},
+	{
+		"id": "level5",
+		"title": "LEVEL 5",
+		"subtitle": "Paradoks Rekursif",
+		"path": "res://level5/level5.tscn",
+		"accent": "purple"
+	},
+	{
+		"id": "level6",
+		"title": "LEVEL 6",
+		"subtitle": "Tiga Dimensi",
+		"path": "res://level6/level6.tscn",
+		"accent": "teal"
+	},
+	{
+		"id": "level7",
+		"title": "LEVEL 7",
+		"subtitle": "Rantai Rekursi",
+		"path": "res://level7/level7.tscn",
+		"accent": "coral"
+	},
+	{
+		"id": "level8",
+		"title": "LEVEL 8",
+		"subtitle": "Jembatan Paradoks",
+		"path": "res://level8/level8.tscn",
+		"accent": "yellow"
+	},
+	{
+		"id": "level9",
+		"title": "LEVEL 9",
+		"subtitle": "Empat Dimensi",
+		"path": "res://level9/level9.tscn",
+		"accent": "teal"
+	},
+	{
+		"id": "level10",
+		"title": "LEVEL 10",
+		"subtitle": "Puncak Rekursi (Final)",
+		"path": "res://level10/level10.tscn",
+		"accent": "coral"
 	}
 ]
 
@@ -123,15 +182,21 @@ func load_settings() -> void:
 		return
 	muted = bool(cfg.get_value("audio", "muted", muted))
 	sfx_volume = float(cfg.get_value("audio", "sfx_volume", sfx_volume))
+	music_muted = bool(cfg.get_value("audio", "music_muted", music_muted))
+	music_volume = float(cfg.get_value("audio", "music_volume", music_volume))
 	fullscreen = bool(cfg.get_value("video", "fullscreen", fullscreen))
 	_apply_fullscreen()
+	settings_changed.emit()
 
 func save_settings() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("audio", "muted", muted)
 	cfg.set_value("audio", "sfx_volume", sfx_volume)
+	cfg.set_value("audio", "music_muted", music_muted)
+	cfg.set_value("audio", "music_volume", music_volume)
 	cfg.set_value("video", "fullscreen", fullscreen)
 	cfg.save(SETTINGS_PATH)
+	settings_changed.emit()
 
 func set_fullscreen(value: bool) -> void:
 	fullscreen = value

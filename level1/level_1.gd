@@ -80,16 +80,29 @@ var game_state := {}
 var undo_stack: Array[Dictionary] = []
 var is_animating: bool = false
 var is_completed: bool = false
+var step_count: int = 0
+var is_in_menu: bool = false
 
 var board_container: Node2D
+var hud_layer: CanvasLayer
 var hud_label: Label
+var step_panel: PanelContainer
+var step_label: Label
+var bg_layer: CanvasLayer
 var bg_rect: ColorRect
 var win_overlay: CanvasLayer
+var win_step_label: Label
 
 func _ready() -> void:
+	is_in_menu = get_parent() != null and get_parent() != get_tree().root
 	_setup_hud()
 	_setup_win_overlay()
 	_reset_level()
+	if is_in_menu:
+		if hud_layer != null:
+			hud_layer.visible = false
+		if bg_layer != null:
+			bg_layer.visible = false
 
 # ==============================================================================
 # 3. INISIALISASI, UNDO & RESET LEVEL
@@ -98,6 +111,8 @@ func _reset_level(play_sound: bool = false) -> void:
 	if play_sound:
 		Sfx.play("reset")
 	undo_stack.clear()
+	step_count = 0
+	_update_step_hud()
 	is_completed = false
 	if win_overlay != null:
 		win_overlay.visible = false
@@ -136,12 +151,18 @@ func _reset_level(play_sound: bool = false) -> void:
 	_rebuild_visuals("none")
 
 func _save_undo() -> void:
-	undo_stack.append(game_state.duplicate(true))
+	var snap: Dictionary = game_state.duplicate(true)
+	snap["step_count"] = step_count
+	undo_stack.append(snap)
 
 func _undo_move() -> void:
 	if undo_stack.is_empty() or is_animating or is_completed:
 		return
-	game_state = undo_stack.pop_back()
+	var prev: Dictionary = undo_stack.pop_back()
+	if prev.has("step_count"):
+		step_count = prev["step_count"]
+	game_state = prev
+	_update_step_hud()
 	Sfx.play("undo")
 	_rebuild_visuals("none")
 
@@ -149,7 +170,7 @@ func _undo_move() -> void:
 # 4. INPUT KEYBOARD (WASD / PANAH, UNDO, RESET, ESC)
 # ==============================================================================
 func _unhandled_input(event: InputEvent) -> void:
-	if is_animating:
+	if is_in_menu or is_animating:
 		return
 
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -212,6 +233,8 @@ func _try_move_player(dir: Vector2i) -> void:
 	p["pos"] = res["pos"]
 	p["path"] = res["path"]
 	game_state["active_room"] = res["room"]
+	step_count += 1
+	_update_step_hud()
 
 	var transition := "move"
 	if res["room"] != old_room:
@@ -291,7 +314,8 @@ func _resolve_move(room: String, pos: Vector2i, dir: Vector2i, depth: int, mover
 # 6. RENDER VISUAL PROSEDURAL (MINIATUR ISI KOTAK REKURSIF + ANIMASI ZOOM)
 # ==============================================================================
 func _calc_tile_size(rows: int, cols: int, vp: Vector2) -> float:
-	var avail := Vector2(vp.x * 0.92, vp.y - 110.0)
+	var max_w: float = minf(vp.x - 490.0, vp.x * 0.52) if is_in_menu else vp.x * 0.92
+	var avail := Vector2(max_w, vp.y - 120.0)
 	var fit: float = floorf(minf(avail.x / float(cols), avail.y / float(rows)))
 	return clampf(fit, 24.0, float(TILE_SIZE))
 
@@ -314,9 +338,12 @@ func _rebuild_visuals(transition: String, dash_from: Vector2i = INVALID_POS, das
 	var vp_size: Vector2 = get_viewport_rect().size
 	var ts: float = _calc_tile_size(rows_count, cols_count, vp_size)
 
-	# Papan berpusat di tengah layar; semua anak diposisikan relatif ke pusat papan,
-	# sehingga animasi scale (zoom) berpusat di tengah.
-	board_container.position = vp_size / 2.0 + Vector2(0.0, 24.0)
+	# Papan berpusat di tengah layar; di menu utama digeser ke kanan agar tidak tertutup seleksi menu
+	if is_in_menu:
+		var board_cx: float = maxf(vp_size.x * 0.68, 470.0 + (cols_count * ts) / 2.0)
+		board_container.position = Vector2(board_cx, vp_size.y * 0.5)
+	else:
+		board_container.position = vp_size / 2.0 + Vector2(0.0, 24.0)
 	var origin := -Vector2(cols_count, rows_count) * ts / 2.0 + Vector2(ts / 2.0, ts / 2.0)
 
 	# 1. LANTAI, DINDING, TARGET & PINTU
@@ -475,6 +502,7 @@ func _check_win_condition() -> void:
 						return
 
 	is_completed = true
+	_update_step_hud()
 	win_overlay.visible = true
 	GameConfig.complete_level("level1")
 	Sfx.play("win")
@@ -530,6 +558,13 @@ func _setup_win_overlay() -> void:
 	msg.add_theme_color_override("font_color", palette["text"])
 	msg.add_theme_font_size_override("font_size", 15)
 	vbox.add_child(msg)
+
+	win_step_label = Label.new()
+	win_step_label.text = "Total Langkah: 0"
+	win_step_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	win_step_label.add_theme_color_override("font_color", palette["teal"])
+	win_step_label.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(win_step_label)
 
 	var next_btn := Button.new()
 	next_btn.text = "  Lanjut ke Level 2 ▶  "
@@ -641,7 +676,7 @@ func _find_parent_box(room_id: String, path: Array) -> Dictionary:
 	return {}
 
 func _setup_hud() -> void:
-	var bg_layer := CanvasLayer.new()
+	bg_layer = CanvasLayer.new()
 	bg_layer.layer = -1
 	add_child(bg_layer)
 
@@ -650,7 +685,7 @@ func _setup_hud() -> void:
 	bg_rect.color = palette["bg"]
 	bg_layer.add_child(bg_rect)
 
-	var hud_layer := CanvasLayer.new()
+	hud_layer = CanvasLayer.new()
 	hud_layer.layer = 5
 	add_child(hud_layer)
 
@@ -659,6 +694,39 @@ func _setup_hud() -> void:
 	hud_label.add_theme_font_size_override("font_size", 17)
 	hud_label.add_theme_color_override("font_color", palette["wall_highlight"])
 	hud_layer.add_child(hud_label)
+
+	step_panel = PanelContainer.new()
+	step_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	step_panel.anchor_left = 1.0
+	step_panel.anchor_right = 1.0
+	step_panel.offset_left = -196
+	step_panel.offset_top = 20
+	step_panel.offset_right = -36
+	step_panel.offset_bottom = 60
+	var sb_step := StyleBoxFlat.new()
+	sb_step.bg_color = Color("#1a1d2b")
+	sb_step.border_color = palette["yellow"]
+	sb_step.set_border_width_all(2)
+	sb_step.set_corner_radius_all(12)
+	sb_step.set_content_margin_all(8)
+	sb_step.content_margin_left = 16
+	sb_step.content_margin_right = 16
+	step_panel.add_theme_stylebox_override("panel", sb_step)
+
+	step_label = Label.new()
+	step_label.text = "LANGKAH: 0"
+	step_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	step_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	step_label.add_theme_font_size_override("font_size", 15)
+	step_label.add_theme_color_override("font_color", palette["yellow"])
+	step_panel.add_child(step_label)
+	hud_layer.add_child(step_panel)
+
+func _update_step_hud() -> void:
+	if step_label != null:
+		step_label.text = "LANGKAH: %d" % step_count
+	if win_step_label != null:
+		win_step_label.text = "Total Langkah: %d" % step_count
 
 # ==============================================================================
 # 9. INNER CLASSES: MENGGAMBAR SPRITE VEKTOR & MINIATUR RUANGAN (_draw)

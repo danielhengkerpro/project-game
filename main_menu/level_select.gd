@@ -44,6 +44,17 @@ func _go_back() -> void:
 	if ResourceLoader.exists(MENU_PATH):
 		get_tree().change_scene_to_file(MENU_PATH)
 
+func _is_level_unlocked(index: int) -> bool:
+	if index == 0:
+		return true
+	var level_id: String = GameConfig.levels[index]["id"]
+	if level_id == "tutorial":
+		return true
+	var previous_id: String = GameConfig.levels[index - 1]["id"]
+	if previous_id == "tutorial":
+		return true
+	return GameConfig._level_index(previous_id) <= GameConfig._level_index(GameConfig.last_completed_id)
+
 func _play(freq: float, dur: float) -> void:
 	var vol: float = 0.0 if GameConfig.muted else GameConfig.sfx_volume
 	MenuUI.play_tone(audio_playback, freq, dur, vol)
@@ -99,10 +110,15 @@ func _build() -> void:
 	))
 
 	# --- Daftar level ---
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(scroll)
+
 	var list := VBoxContainer.new()
-	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	list.add_theme_constant_override("separation", 12)
-	root.add_child(list)
+	scroll.add_child(list)
 
 	var freqs: Array = [440.0, 493.88, 523.25, 587.33, 659.25]
 	var idx: int = 0
@@ -114,12 +130,13 @@ func _build() -> void:
 		var accent: Color = MenuUI.accent_color(lv["accent"])
 		var freq: float = freqs[idx % freqs.size()]
 		var exists: bool = ResourceLoader.exists(level_path)
+		var unlocked: bool = _is_level_unlocked(idx)
 
 		if not exists:
 			level_sub += "   (scene belum ada)"
 
 		var btn := MenuUI.make_menu_button(level_title, level_sub, accent)
-		btn.disabled = not exists
+		btn.disabled = not exists or not unlocked
 		btn.mouse_entered.connect(func(): _play(freq, 0.06))
 		btn.pressed.connect(func():
 			_play(freq * 1.25, 0.12)

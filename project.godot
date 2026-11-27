@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 
 GameConfig="*res://autoload/game_config.gd"
 Sfx="*res://autoload/sfx.gd"
+Music="*res://autoload/music.gd"
 _mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
 
 [display]

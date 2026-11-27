@@ -56,5 +56,5 @@ Saat orang lain menambah Level 3 dan seterusnya, lakukan **semua** langkah ini:
 ## Sejarah singkat
 
 - `level1` = "Gua Kotak", `level2` = "Gua Bersarang". Target pemain `P` Level 2 ada di ruang `outer` (1,1) supaya pemain keluar dari kotak sebelum menang.
-- Solusi referensi: Level 1 49 langkah, Level 2 54 langkah.
+- Solusi referensi: Level 1 49 langkah, Level 2 71 langkah.
 - Tombol "Mulai Bermain" dulu memanggil `first_playable_level()`; sekarang memakai progres. Jangan kembalikan ke perilaku lama.

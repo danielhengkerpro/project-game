@@ -6,9 +6,10 @@ extends Node2D
 # Tiga ruangan bersarang: outer -> dalam kotak biru -> dalam kotak kuning.
 # Mekanik baru yang dipakai di level ini:
 #   1. Kotak harus MENTOK dulu sebelum bisa dimasuki.
-#   2. Mendorong peti ke lubang kotak lain akan memindahkan peti itu KE DALAM
-#      kotak tersebut. Ini jalan satu-satunya untuk menembus dua lapis ruangan.
-#   3. Kotak yang belum mentok akan ikut terdorong, bukan ditembus -> jebakan.
+#   2. Arah pintu tiap lapisan berbeda: kotak biru berpintu KIRI, sedangkan
+#      kotak kuning di dalamnya berpintu ATAS.
+#   3. Bawa peti dari ruang luar menembus dua lapis ruangan hingga ke dalam
+#      kotak kuning, lalu selesaikan target di dalam kotak biru sebelum keluar.
 # ==============================================================================
 
 # ==============================================================================
@@ -22,6 +23,7 @@ const DASH_TRAIL_DURATION: float = 0.22
 const MAX_DEPTH: int = 40
 const INVALID_POS := Vector2i(-1, -1)
 const MAIN_MENU_PATH: String = "res://main_menu/main_menu.tscn"
+const LEVEL3_PATH: String = "res://level3/level3.tscn"
 
 var palette := {
 	"bg": Color("#000000"),
@@ -42,6 +44,7 @@ var palette := {
 	"bg_yellow": Color("#3d2f0a"),
 	"pink": Color("#de6edc"),
 	"pink_inner": Color("#a21caf"),
+	"teal": Color("#4ecdc4"),
 	"text": Color("#f1f2f6")
 }
 
@@ -77,37 +80,36 @@ var rooms := {
 		"name": "Level 2 - Gua Bersarang",
 		"theme": "orange",
 		"grid": [
-			"#########",
-			"#P......#",
-			"#.......#",
-			"#.......#",
-			"#...#.b.#",
-			"#.......#",
-			"#########"
+			"########",
+			"#P..#..#",
+			"#......#",
+			"#.##.#.#",
+			"#......#",
+			"#..#...#",
+			"########"
 		]
 	},
 	"in_blue": {
 		"name": "Dalam Kotak Biru",
 		"theme": "blue",
 		"grid": [
-			"#########",
-			"#.......#",
-			"#.......#",
-			"E...y...#",
-			"#.......#",
-			"#.c.....#",
-			"#.......#",
-			"#########"
+			"#######",
+			"#..#.G#",
+			"#.....#",
+			"E.....#",
+			"#..#..#",
+			"#.....#",
+			"#######"
 		]
 	},
 	"in_yellow": {
 		"name": "Dalam Kotak Kuning",
 		"theme": "yellow",
 		"grid": [
-			"#######",
-			"#.G...#",
+			"###E###",
 			"#.....#",
-			"E.....#",
+			"#.#...#",
+			"#...G.#",
 			"#.....#",
 			"#######"
 		]
@@ -118,11 +120,16 @@ var game_state := {}
 var undo_stack: Array[Dictionary] = []
 var is_animating: bool = false
 var is_completed: bool = false
+var step_count: int = 0
 
 var board_container: Node2D
+var hud_layer: CanvasLayer
 var hud_label: Label
+var step_panel: PanelContainer
+var step_label: Label
 var bg_rect: ColorRect
 var win_overlay: CanvasLayer
+var win_step_label: Label
 
 func _ready() -> void:
 	_setup_hud()
@@ -136,6 +143,8 @@ func _reset_level(play_sound: bool = false) -> void:
 	if play_sound:
 		Sfx.play("reset")
 	undo_stack.clear()
+	step_count = 0
+	_update_step_hud()
 	is_completed = false
 	if win_overlay != null:
 		win_overlay.visible = false
@@ -144,28 +153,35 @@ func _reset_level(play_sound: bool = false) -> void:
 		"active_room": "outer",
 		"player": {
 			"room": "outer",
-			"pos": Vector2i(3, 3),
+			"pos": Vector2i(1, 2),
 			"path": []
 		},
 		"boxes": [
 			{
 				"id": "box_blue",
 				"room": "outer",
-				"pos": Vector2i(6, 4),
+				"pos": Vector2i(2, 4),
 				"color": "blue",
 				"target_room": "in_blue"
 			},
 			{
 				"id": "box_yellow",
 				"room": "in_blue",
-				"pos": Vector2i(4, 3),
+				"pos": Vector2i(4, 2),
 				"color": "yellow",
 				"target_room": "in_yellow"
 			},
 			{
-				"id": "crate",
+				"id": "crate_1",
+				"room": "outer",
+				"pos": Vector2i(5, 2),
+				"color": "yellow",
+				"target_room": ""
+			},
+			{
+				"id": "crate_2",
 				"room": "in_blue",
-				"pos": Vector2i(2, 5),
+				"pos": Vector2i(2, 4),
 				"color": "yellow",
 				"target_room": ""
 			}
@@ -174,12 +190,18 @@ func _reset_level(play_sound: bool = false) -> void:
 	_rebuild_visuals("none")
 
 func _save_undo() -> void:
-	undo_stack.append(game_state.duplicate(true))
+	var snap: Dictionary = game_state.duplicate(true)
+	snap["step_count"] = step_count
+	undo_stack.append(snap)
 
 func _undo_move() -> void:
 	if undo_stack.is_empty() or is_animating or is_completed:
 		return
-	game_state = undo_stack.pop_back()
+	var prev: Dictionary = undo_stack.pop_back()
+	if prev.has("step_count"):
+		step_count = prev["step_count"]
+	game_state = prev
+	_update_step_hud()
 	Sfx.play("undo")
 	_rebuild_visuals("none")
 
@@ -232,6 +254,8 @@ func _try_move_player(dir: Vector2i) -> void:
 	p["pos"] = res["pos"]
 	p["path"] = res["path"]
 	game_state["active_room"] = res["room"]
+	step_count += 1
+	_update_step_hud()
 
 	var transition := "move"
 	if res["room"] != old_room:
@@ -481,14 +505,17 @@ func _check_win_condition() -> void:
 			for x in range(grid[y].length()):
 				var ch: String = grid[y][x]
 				var pos := Vector2i(x, y)
-				if ch == "G" and _get_box_at(room_id, pos).is_empty():
-					return
+				if ch == "G":
+					var on_goal: Dictionary = _get_box_at(room_id, pos)
+					if on_goal.is_empty() or on_goal["target_room"] != "":
+						return
 				if ch == "P":
 					var pl: Dictionary = game_state["player"]
 					if pl["room"] != room_id or pl["pos"] != pos:
 						return
 
 	is_completed = true
+	_update_step_hud()
 	win_overlay.visible = true
 	GameConfig.complete_level("level2")
 	Sfx.play("win")
@@ -545,6 +572,25 @@ func _setup_win_overlay() -> void:
 	msg.add_theme_font_size_override("font_size", 15)
 	vbox.add_child(msg)
 
+	win_step_label = Label.new()
+	win_step_label.text = "Total Langkah: 0"
+	win_step_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	win_step_label.add_theme_color_override("font_color", palette["teal"])
+	win_step_label.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(win_step_label)
+
+	var next_btn := Button.new()
+	next_btn.text = "  Lanjut ke Level 3 ▶  "
+	next_btn.custom_minimum_size = Vector2(0, 52)
+	var n_sb := StyleBoxFlat.new()
+	n_sb.bg_color = palette["teal"]
+	n_sb.set_corner_radius_all(8)
+	next_btn.add_theme_stylebox_override("normal", n_sb)
+	next_btn.add_theme_color_override("font_color", Color("#0d0f14"))
+	next_btn.add_theme_font_size_override("font_size", 16)
+	next_btn.pressed.connect(_go_to_level3)
+	vbox.add_child(next_btn)
+
 	var btn_box := HBoxContainer.new()
 	btn_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	btn_box.add_theme_constant_override("separation", 14)
@@ -570,6 +616,10 @@ func _setup_win_overlay() -> void:
 func _go_to_main_menu() -> void:
 	if ResourceLoader.exists(MAIN_MENU_PATH):
 		get_tree().change_scene_to_file(MAIN_MENU_PATH)
+
+func _go_to_level3() -> void:
+	if ResourceLoader.exists(LEVEL3_PATH):
+		get_tree().change_scene_to_file(LEVEL3_PATH)
 
 # ==============================================================================
 # 8. HELPER GRID & HUD
@@ -643,7 +693,7 @@ func _setup_hud() -> void:
 	bg_rect.color = palette["bg"]
 	bg_layer.add_child(bg_rect)
 
-	var hud_layer := CanvasLayer.new()
+	hud_layer = CanvasLayer.new()
 	hud_layer.layer = 5
 	add_child(hud_layer)
 
@@ -652,6 +702,39 @@ func _setup_hud() -> void:
 	hud_label.add_theme_font_size_override("font_size", 17)
 	hud_label.add_theme_color_override("font_color", palette["wall_highlight"])
 	hud_layer.add_child(hud_label)
+
+	step_panel = PanelContainer.new()
+	step_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	step_panel.anchor_left = 1.0
+	step_panel.anchor_right = 1.0
+	step_panel.offset_left = -196
+	step_panel.offset_top = 20
+	step_panel.offset_right = -36
+	step_panel.offset_bottom = 60
+	var sb_step := StyleBoxFlat.new()
+	sb_step.bg_color = Color("#1a1d2b")
+	sb_step.border_color = palette["yellow"]
+	sb_step.set_border_width_all(2)
+	sb_step.set_corner_radius_all(12)
+	sb_step.set_content_margin_all(8)
+	sb_step.content_margin_left = 16
+	sb_step.content_margin_right = 16
+	step_panel.add_theme_stylebox_override("panel", sb_step)
+
+	step_label = Label.new()
+	step_label.text = "LANGKAH: 0"
+	step_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	step_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	step_label.add_theme_font_size_override("font_size", 15)
+	step_label.add_theme_color_override("font_color", palette["yellow"])
+	step_panel.add_child(step_label)
+	hud_layer.add_child(step_panel)
+
+func _update_step_hud() -> void:
+	if step_label != null:
+		step_label.text = "LANGKAH: %d" % step_count
+	if win_step_label != null:
+		win_step_label.text = "Total Langkah: %d" % step_count
 
 # ==============================================================================
 # 9. INNER CLASSES: MENGGAMBAR SPRITE VEKTOR & MINIATUR RUANGAN (_draw)
