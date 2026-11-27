@@ -198,6 +198,9 @@ func save_settings() -> void:
 	cfg.save(SETTINGS_PATH)
 	settings_changed.emit()
 
+func is_fullscreen_blocked() -> bool:
+	return Engine.is_embedded_in_editor()
+
 func set_fullscreen(value: bool) -> void:
 	fullscreen = value
 	_apply_fullscreen()
@@ -205,12 +208,13 @@ func set_fullscreen(value: bool) -> void:
 	fullscreen_changed.emit(fullscreen)
 
 func _apply_fullscreen() -> void:
-	if DisplayServer.get_name() == "headless":
+	if DisplayServer.get_name() == "headless" or Engine.is_embedded_in_editor():
 		return
-	if fullscreen:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
-	else:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	var target_mode := DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen else DisplayServer.WINDOW_MODE_WINDOWED
+	DisplayServer.window_set_mode(target_mode)
+	var win := get_window()
+	if win != null:
+		win.mode = Window.MODE_FULLSCREEN if fullscreen else Window.MODE_WINDOWED
 
 # F11 = pintasan layar penuh, dipakai kalau tombol di menu sulit diklik.
 func _unhandled_input(event: InputEvent) -> void:

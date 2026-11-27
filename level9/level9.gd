@@ -23,7 +23,7 @@ const MAIN_MENU_PATH: String = "res://main_menu/main_menu.tscn"
 const LEVEL10_PATH: String = "res://level10/level10.tscn"
 
 var palette := {
-	"bg": Color("#000000"),
+	"bg": Color("#180f0c"),
 	"bg_blue": Color("#2f5572"),
 	"bg_purple": Color("#20122b"),
 	"floor": Color("#77432b"),
@@ -56,7 +56,7 @@ var themes := {
 		"wall": Color("#ffaa77"),
 		"floor": Color("#77432b"),
 		"light": Color("#fbe49a"),
-		"bg": Color("#000000")
+		"bg": Color("#180f0c")
 	},
 	"blue": {
 		"wall": Color("#b6dcee"),
@@ -417,7 +417,7 @@ func _rebuild_visuals(transition: String, dash_from: Vector2i = INVALID_POS, das
 	player_node.position = origin + Vector2(p_start.x, p_start.y) * ts
 	board_container.add_child(player_node)
 
-	hud_label.text = "%s   |   [WASD/Panah] Gerak   •   [Z] Undo   •   [R] Reset   •   [ESC] Menu" % room_data["name"]
+	hud_label.text = room_data["name"]
 
 	if transition == "enter":
 		is_animating = true
@@ -484,97 +484,19 @@ func _check_win_condition() -> void:
 	Sfx.play("win")
 
 func _setup_win_overlay() -> void:
-	win_overlay = CanvasLayer.new()
-	win_overlay.layer = 10
-	win_overlay.visible = false
-	add_child(win_overlay)
-
-	var backdrop := ColorRect.new()
-	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	backdrop.color = Color(0.05, 0.06, 0.09, 0.82)
-	win_overlay.add_child(backdrop)
-
-	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	backdrop.add_child(center)
-
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(480, 0)
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color("#1a1d2b")
-	sb.border_color = palette["yellow"]
-	sb.set_border_width_all(3)
-	sb.set_corner_radius_all(16)
-	sb.set_content_margin_all(32)
-	panel.add_theme_stylebox_override("panel", sb)
-	center.add_child(panel)
-
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 16)
-	panel.add_child(vbox)
-
-	var badge := Label.new()
-	badge.text = "★ LEVEL 9 BERHASIL ★"
-	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	badge.add_theme_color_override("font_color", palette["purple_light"])
-	badge.add_theme_font_size_override("font_size", 14)
-	vbox.add_child(badge)
-
-	var title := Label.new()
-	title.text = "SELAMAT!"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", palette["yellow"])
-	title.add_theme_font_size_override("font_size", 38)
-	vbox.add_child(title)
-
-	var msg := Label.new()
-	msg.text = "Empat dimensi dengan pintu dari segala arah berhasil ditaklukkan!\nBersiaplah menghadapi level terakhir: Puncak Rekursi."
-	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	msg.add_theme_color_override("font_color", palette["text"])
-	msg.add_theme_font_size_override("font_size", 15)
-	vbox.add_child(msg)
-
-	win_step_label = Label.new()
-	win_step_label.text = "Total Langkah: 0"
-	win_step_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	win_step_label.add_theme_color_override("font_color", palette["teal"])
-	win_step_label.add_theme_font_size_override("font_size", 16)
-	vbox.add_child(win_step_label)
-
-	var next_btn := Button.new()
-	next_btn.text = "  Lanjut ke Level 10 (Final) ▶  "
-	next_btn.custom_minimum_size = Vector2(0, 52)
-	var n_sb := StyleBoxFlat.new()
-	n_sb.bg_color = palette["teal"]
-	n_sb.set_corner_radius_all(8)
-	next_btn.add_theme_stylebox_override("normal", n_sb)
-	next_btn.add_theme_color_override("font_color", Color("#0d0f14"))
-	next_btn.add_theme_font_size_override("font_size", 16)
-	next_btn.pressed.connect(_go_to_level10)
-	vbox.add_child(next_btn)
-
-	var btn_box := HBoxContainer.new()
-	btn_box.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_box.add_theme_constant_override("separation", 14)
-	vbox.add_child(btn_box)
-
-	var retry_btn := Button.new()
-	retry_btn.text = "  ↺ Ulangi Level (R)  "
-	retry_btn.custom_minimum_size = Vector2(0, 46)
-	retry_btn.pressed.connect(func(): _reset_level(true))
-	btn_box.add_child(retry_btn)
-
-	var menu_btn := Button.new()
-	menu_btn.text = "  ▶ Kembali ke Menu Utama  "
-	menu_btn.custom_minimum_size = Vector2(0, 46)
-	var m_sb := StyleBoxFlat.new()
-	m_sb.bg_color = palette["blue"]
-	m_sb.set_corner_radius_all(8)
-	menu_btn.add_theme_stylebox_override("normal", m_sb)
-	menu_btn.add_theme_color_override("font_color", Color("#0d0f14"))
-	menu_btn.pressed.connect(_go_to_main_menu)
-	btn_box.add_child(menu_btn)
+	var ui: Dictionary = MenuUI.build_win_overlay(
+		self,
+		"LEVEL 9 SELESAI",
+		"SELAMAT!",
+		"Empat dimensi dengan pintu dari segala arah berhasil ditaklukkan!\nBersiaplah menghadapi level terakhir: Puncak Rekursi.",
+		palette["purple_light"],
+		"Lanjut ke Level 10 (Final)",
+		_go_to_level10,
+		func(): _reset_level(true),
+		_go_to_main_menu
+	)
+	win_overlay = ui["win_overlay"]
+	win_step_label = ui["win_step_label"]
 
 func _go_to_level10() -> void:
 	if ResourceLoader.exists(LEVEL10_PATH):
@@ -631,51 +553,19 @@ func _find_parent_box(room_id: String, path: Array) -> Dictionary:
 	return {}
 
 func _setup_hud() -> void:
-	var bg_layer := CanvasLayer.new()
-	bg_layer.layer = -1
-	add_child(bg_layer)
-
-	bg_rect = ColorRect.new()
-	bg_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg_rect.color = palette["bg"]
-	bg_layer.add_child(bg_rect)
-
-	hud_layer = CanvasLayer.new()
-	hud_layer.layer = 5
-	add_child(hud_layer)
-
-	hud_label = Label.new()
-	hud_label.position = Vector2(36, 28)
-	hud_label.add_theme_font_size_override("font_size", 17)
-	hud_label.add_theme_color_override("font_color", palette["wall_highlight"])
-	hud_layer.add_child(hud_label)
-
-	step_panel = PanelContainer.new()
-	step_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	step_panel.anchor_left = 1.0
-	step_panel.anchor_right = 1.0
-	step_panel.offset_left = -196
-	step_panel.offset_top = 20
-	step_panel.offset_right = -36
-	step_panel.offset_bottom = 60
-	var sb_step := StyleBoxFlat.new()
-	sb_step.bg_color = Color("#1a1d2b")
-	sb_step.border_color = palette["yellow"]
-	sb_step.set_border_width_all(2)
-	sb_step.set_corner_radius_all(12)
-	sb_step.set_content_margin_all(8)
-	sb_step.content_margin_left = 16
-	sb_step.content_margin_right = 16
-	step_panel.add_theme_stylebox_override("panel", sb_step)
-
-	step_label = Label.new()
-	step_label.text = "LANGKAH: 0"
-	step_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	step_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	step_label.add_theme_font_size_override("font_size", 15)
-	step_label.add_theme_color_override("font_color", palette["yellow"])
-	step_panel.add_child(step_label)
-	hud_layer.add_child(step_panel)
+	var ui: Dictionary = MenuUI.build_game_hud(
+		self,
+		palette["bg"],
+		palette["wall"],
+		_go_to_main_menu,
+		_undo_move,
+		func(): _reset_level(true)
+	)
+	bg_rect = ui["bg_rect"]
+	hud_layer = ui["hud_layer"]
+	hud_label = ui["hud_label"]
+	step_panel = ui["step_panel"]
+	step_label = ui["step_label"]
 
 func _update_step_hud() -> void:
 	if step_label != null: step_label.text = "LANGKAH: %d" % step_count

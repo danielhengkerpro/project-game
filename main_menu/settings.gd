@@ -9,6 +9,8 @@ const MENU_PATH: String = "res://main_menu/main_menu.tscn"
 
 var zoom_progress: float = 0.0
 var anim_speed: float = 0.25
+var spin_angle: float = 0.0
+var spin_speed: float = 0.09
 var zoom_direction: int = 1
 var smooth_mouse_offset: Vector2 = Vector2.ZERO
 
@@ -21,19 +23,24 @@ func _ready() -> void:
 	audio_playback = tone[1]
 	_build()
 
-# ------------------------------------------------------------------ background
+# ------------------------------------------------------------------ latar belakang
 func _process(delta: float) -> void:
-	zoom_progress = fmod(zoom_progress + anim_speed * zoom_direction * delta + 1.0, 1.0)
+	zoom_progress = fmod(zoom_progress + anim_speed * zoom_direction * delta + 4.0, 4.0)
+	spin_angle = fmod(spin_angle + spin_speed * zoom_direction * delta + TAU, TAU)
 
 	var vp: Vector2 = get_viewport_rect().size
 	if vp.x > 0.0 and vp.y > 0.0:
-		var norm_mouse: Vector2 = (get_global_mouse_position() / vp) - Vector2(0.5, 0.5)
-		smooth_mouse_offset = smooth_mouse_offset.lerp(norm_mouse * 90.0, 6.0 * delta)
+		var m_pos: Vector2 = get_global_mouse_position()
+		var target_off := Vector2.ZERO
+		if is_finite(m_pos.x) and is_finite(m_pos.y) and absf(m_pos.x) <= vp.x * 2.0 and absf(m_pos.y) <= vp.y * 2.0:
+			var norm_mouse: Vector2 = ((m_pos / vp) - Vector2(0.5, 0.5)).clamp(Vector2(-0.6, -0.6), Vector2(0.6, 0.6))
+			target_off = norm_mouse * 72.0
+		smooth_mouse_offset = smooth_mouse_offset.lerp(target_off, 6.0 * delta)
 
 	queue_redraw()
 
 func _draw() -> void:
-	MenuUI.draw_recursive_bg(self, zoom_progress, smooth_mouse_offset)
+	MenuUI.draw_recursive_bg(self, zoom_progress, smooth_mouse_offset, true, spin_angle)
 
 # ------------------------------------------------------------------ input
 func _unhandled_input(event: InputEvent) -> void:
@@ -49,9 +56,9 @@ func _play(freq: float, dur: float) -> void:
 	var vol: float = 0.0 if GameConfig.muted else GameConfig.sfx_volume
 	MenuUI.play_tone(audio_playback, freq, dur, vol)
 
-# Baris pengaturan: label ikut bisa diklik, toggle-nya sedikit diperbesar.
 func _siapkan_baris(label: Label, chk: CheckButton) -> void:
 	chk.custom_minimum_size = Vector2(52, 28)
+	chk.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	label.mouse_filter = Control.MOUSE_FILTER_STOP
 	label.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	label.gui_input.connect(func(event: InputEvent):
@@ -66,11 +73,12 @@ func _build() -> void:
 	add_child(ui_layer)
 
 	var margin := MarginContainer.new()
+	margin.theme = MenuUI.create_menu_theme()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.add_theme_constant_override("margin_left", 56)
 	margin.add_theme_constant_override("margin_right", 56)
-	margin.add_theme_constant_override("margin_top", 32)
-	margin.add_theme_constant_override("margin_bottom", 28)
+	margin.add_theme_constant_override("margin_top", 30)
+	margin.add_theme_constant_override("margin_bottom", 26)
 	ui_layer.add_child(margin)
 
 	var root := VBoxContainer.new()
@@ -82,9 +90,7 @@ func _build() -> void:
 	header.custom_minimum_size = Vector2(0, 40)
 	root.add_child(header)
 
-	var back_btn := Button.new()
-	back_btn.text = "  ◀  KEMBALI  "
-	back_btn.add_theme_font_size_override("font_size", 13)
+	var back_btn := MenuUI.make_icon_pill_button("back", "KEMBALI", MenuUI.PALETTE["cream"])
 	back_btn.pressed.connect(func():
 		_play(329.63, 0.08)
 		_go_back()
@@ -95,27 +101,38 @@ func _build() -> void:
 	header_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(header_spacer)
 
-	root.add_child(MenuUI.make_label("PENGATURAN", 40, MenuUI.PALETTE["text_main"]))
-	root.add_child(MenuUI.make_label(
-		"Perubahan langsung tersimpan.",
-		15,
+	# Kontainer tengah dengan lebar proporsional (720px)
+	var center_wrap := CenterContainer.new()
+	center_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(center_wrap)
+
+	var col := VBoxContainer.new()
+	col.custom_minimum_size = Vector2(700, 0)
+	col.add_theme_constant_override("separation", 14)
+	center_wrap.add_child(col)
+
+	col.add_child(MenuUI.make_label("Pengaturan", 40, MenuUI.PALETTE["cream"], true, false))
+	col.add_child(MenuUI.make_label(
+		"Semua perubahan langsung tersimpan otomatis.",
+		14,
 		MenuUI.PALETTE["text_muted"]
 	))
 
 	# --- Panel isi ---
 	var panel := MenuUI.make_panel()
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_child(panel)
+	col.add_child(panel)
 
 	var rows := VBoxContainer.new()
-	rows.add_theme_constant_override("separation", 24)
+	rows.add_theme_constant_override("separation", 18)
 	panel.add_child(rows)
+
+	rows.add_child(MenuUI.make_label("AUDIO", 11, MenuUI.PALETTE["purple"], false, true))
 
 	# --- Suara on/off ---
 	var sound_row := HBoxContainer.new()
 	rows.add_child(sound_row)
 
-	var sound_lbl := MenuUI.make_label("Suara", 16, MenuUI.PALETTE["text_main"])
+	var sound_lbl := MenuUI.make_label("Efek Suara (SFX)", 16, MenuUI.PALETTE["text_main"])
 	sound_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sound_row.add_child(sound_lbl)
 
@@ -135,14 +152,16 @@ func _build() -> void:
 	vol_row.add_theme_constant_override("separation", 14)
 	rows.add_child(vol_row)
 
-	var vol_lbl := MenuUI.make_label("Volume SFX", 16, MenuUI.PALETTE["text_main"])
+	var vol_lbl := MenuUI.make_label("Volume SFX", 15, MenuUI.PALETTE["text_muted"])
 	vol_lbl.custom_minimum_size = Vector2(140, 0)
 	vol_row.add_child(vol_lbl)
 
 	var vol_value := MenuUI.make_label(
 		"%d%%" % int(round(GameConfig.sfx_volume * 100.0)),
-		15,
-		MenuUI.PALETTE["teal"]
+		14,
+		MenuUI.PALETTE["teal"],
+		false,
+		true
 	)
 	vol_value.custom_minimum_size = Vector2(56, 0)
 	vol_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -185,14 +204,16 @@ func _build() -> void:
 	music_vol_row.add_theme_constant_override("separation", 14)
 	rows.add_child(music_vol_row)
 
-	var music_vol_lbl := MenuUI.make_label("Volume Musik", 16, MenuUI.PALETTE["text_main"])
+	var music_vol_lbl := MenuUI.make_label("Volume Musik", 15, MenuUI.PALETTE["text_muted"])
 	music_vol_lbl.custom_minimum_size = Vector2(140, 0)
 	music_vol_row.add_child(music_vol_lbl)
 
 	var music_vol_value := MenuUI.make_label(
 		"%d%%" % int(round(GameConfig.music_volume * 100.0)),
-		15,
-		MenuUI.PALETTE["teal"]
+		14,
+		MenuUI.PALETTE["teal"],
+		false,
+		true
 	)
 	music_vol_value.custom_minimum_size = Vector2(56, 0)
 	music_vol_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -213,15 +234,34 @@ func _build() -> void:
 	music_vol_row.add_child(music_vol_slider)
 	music_vol_row.add_child(music_vol_value)
 
+	var sep := HSeparator.new()
+	rows.add_child(sep)
+
+	rows.add_child(MenuUI.make_label("TAMPILAN", 11, MenuUI.PALETTE["purple"], false, true))
+
 	# --- Layar penuh ---
 	var fs_row := HBoxContainer.new()
 	rows.add_child(fs_row)
 
-	var fs_lbl := MenuUI.make_label("Layar Penuh", 16, MenuUI.PALETTE["text_main"])
-	fs_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fs_row.add_child(fs_lbl)
+	var fs_col := VBoxContainer.new()
+	fs_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fs_col.add_theme_constant_override("separation", 2)
+	fs_row.add_child(fs_col)
+
+	var fs_lbl := MenuUI.make_label("Layar Penuh (F11)", 16, MenuUI.PALETTE["text_main"])
+	fs_col.add_child(fs_lbl)
+
+	if GameConfig.is_fullscreen_blocked():
+		var fs_note := MenuUI.make_label(
+			"Mode tertanam di Editor aktif — matikan Embed Game di tab Game agar bisa layar penuh.",
+			12,
+			MenuUI.PALETTE["yellow"]
+		)
+		fs_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		fs_col.add_child(fs_note)
 
 	var fs_chk := CheckButton.new()
+	fs_chk.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	fs_chk.button_pressed = GameConfig.fullscreen
 	fs_chk.toggled.connect(func(on: bool):
 		GameConfig.set_fullscreen(on)
@@ -239,6 +279,8 @@ func _build() -> void:
 	root.add_child(footer)
 	footer.add_child(MenuUI.make_label(
 		"ESC untuk kembali ke menu",
-		12,
-		MenuUI.PALETTE["text_muted"]
+		11,
+		MenuUI.PALETTE["text_muted"],
+		false,
+		true
 	))
